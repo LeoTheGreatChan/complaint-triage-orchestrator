@@ -328,6 +328,39 @@ function computeEscalationSignals(ticket, agent1Output, agent2Output, agent4Outp
   return { requiresHuman, lowConfidence, isHighRiskIssue, isRepeatComplainant, isHighValueAccount, exceedsMonetaryThreshold, statedMonetaryExposure, escalate };
 }
 
+// Ground-truth comparison (spec Section 8 / 15 Phase 5). Section 8 names
+// three CFPB outcome fields to compare against: company response category,
+// timely flag, and disputed flag. The live API does not expose a disputed
+// flag at all -- CFPB discontinued it from the public schema years ago; a
+// live pull returns only company_response and timely (confirmed by
+// inspecting real records during this build, not assumed from the spec
+// text). This uses only the two fields that actually exist.
+//
+// "Elevated" is a deliberately coarse, directional proxy -- Section 8 is
+// explicit this must be reported as "X% agreement," never as accuracy:
+//   - timely === "No": the company missed CFPB's own 15-day response
+//     standard -- a real signal the case likely needed more than routine
+//     handling.
+//   - company_response mentions "monetary relief": CFPB confirms the
+//     company paid the consumer something -- a real signal the underlying
+//     complaint had substance, not just a routine or meritless contact.
+// Anything else ("Closed with explanation" + timely) reads as "routine."
+function computeGroundTruthAgreement(ticket, escalate) {
+  const isTimely = ticket.timely === "Yes";
+  const gotMonetaryRelief = /monetary relief/i.test(ticket.company_response || "");
+  const groundTruthSignal = (!isTimely || gotMonetaryRelief) ? "elevated" : "routine";
+  const agreesWithGroundTruth = (escalate && groundTruthSignal === "elevated") || (!escalate && groundTruthSignal === "routine");
+
+  return {
+    cfpb_company_response: ticket.company_response,
+    cfpb_timely: ticket.timely,
+    cfpb_disputed_flag: "unavailable — CFPB discontinued this field from the public API",
+    ground_truth_signal: groundTruthSignal,
+    pipeline_decision: escalate ? "ESCALATE_TO_HUMAN" : "AUTO_RESOLVE",
+    agrees_with_ground_truth: agreesWithGroundTruth,
+  };
+}
+
 // ===========================================================================
 // Self-test: run the full pipeline over the three fixtures + one negative
 // control before this script is allowed to (re)generate the workflow file.
@@ -358,8 +391,9 @@ function runPipeline(ticket) {
     : null;
 
   const signals = computeEscalationSignals(ticket, agent1_output, agent2_output, agent4_output, HIGH_RISK_ISSUES, HIGH_RISK_CITATION_MARKERS);
+  const ground_truth = computeGroundTruthAgreement(ticket, signals.escalate);
 
-  return { agent1_output, agent1_tool_result, agent2_output, regulation_tool_result, agent3_output, agent3_tool_result, agent4_output, agent4_tool_result, signals };
+  return { agent1_output, agent1_tool_result, agent2_output, regulation_tool_result, agent3_output, agent3_tool_result, agent4_output, agent4_tool_result, signals, ground_truth };
 }
 
 function selfTest() {
@@ -419,6 +453,37 @@ function selfTest() {
   );
   if (threatSignals.isHighRiskIssue !== true) failures.push("Positive control: a real taxonomy threat/harassment issue did not trigger isHighRiskIssue");
 
+  // Ground-truth comparison (Phase 5, spec Section 8): all three fixtures
+  // share company_response="Closed with explanation" + timely="Yes", which
+  // reads as "routine" under this proxy -- yet all three pipeline decisions
+  // are ESCALATE_TO_HUMAN. So agreement is expected to be FALSE for all
+  // three. This is not a bug: it's exactly why Section 8 insists this is
+  // reported as a directional signal, never accuracy -- CFPB's own outcome
+  // categories are coarser than the narrative-informed severity rubric that
+  // correctly flagged these as High. Asserted explicitly so a future change
+  // that silently "fixes" this into agreement=true gets caught, not
+  // celebrated.
+  for (const ticket of FIXTURE_TICKETS) {
+    const result = runPipeline(ticket);
+    if (result.ground_truth.ground_truth_signal !== "routine") failures.push(`${ticket.complaint_id}: expected ground_truth_signal="routine" (Closed with explanation + timely), got "${result.ground_truth.ground_truth_signal}"`);
+    if (result.ground_truth.agrees_with_ground_truth !== false) failures.push(`${ticket.complaint_id}: expected agrees_with_ground_truth=false (escalated against a routine-reading outcome) -- got true; if this changed, confirm it's a real fix and not a proxy regression`);
+  }
+
+  // Positive control: a company missing CFPB's 15-day timely-response
+  // standard should read as "elevated," and agree with an escalate decision.
+  const untimelySignals = computeGroundTruthAgreement({ timely: "No", company_response: "Closed with explanation" }, true);
+  if (untimelySignals.ground_truth_signal !== "elevated" || untimelySignals.agrees_with_ground_truth !== true) {
+    failures.push(`Positive control: untimely company response should read "elevated" and agree with escalate, got ${JSON.stringify(untimelySignals)}`);
+  }
+
+  // Positive control: monetary relief should read as "elevated" too.
+  const monetaryReliefSignals = computeGroundTruthAgreement({ timely: "Yes", company_response: "Closed with monetary relief" }, true);
+  if (monetaryReliefSignals.ground_truth_signal !== "elevated") failures.push(`Positive control: "Closed with monetary relief" should read "elevated", got ${JSON.stringify(monetaryReliefSignals)}`);
+
+  // Positive control: a routine outcome auto-resolved should agree.
+  const routineAutoResolveSignals = computeGroundTruthAgreement({ timely: "Yes", company_response: "Closed with explanation" }, false);
+  if (routineAutoResolveSignals.agrees_with_ground_truth !== true) failures.push(`Positive control: routine outcome + auto-resolve should agree, got ${JSON.stringify(routineAutoResolveSignals)}`);
+
   // Non-fixture complaint_id must not silently fabricate a decision.
   if (AGENT1_FIXTURES["24121673"]) failures.push("Unexpected fixture found for a non-fixture complaint_id");
 
@@ -426,7 +491,7 @@ function selfTest() {
     console.error("SELF-TEST FAILED:\n" + failures.map((f) => `  - ${f}`).join("\n"));
     process.exit(1);
   }
-  console.log(`Self-test passed: ${FIXTURE_TICKETS.length}/${FIXTURE_TICKETS.length} fixtures escalate as expected, negative control holds, taxonomy discrepancy correctly reflected.`);
+  console.log(`Self-test passed: ${FIXTURE_TICKETS.length}/${FIXTURE_TICKETS.length} fixtures escalate as expected, negative control holds, taxonomy discrepancy correctly reflected, ground-truth proxy behaves as documented.`);
 }
 
 selfTest();
@@ -688,6 +753,29 @@ const signals = computeEscalationSignals(ticket, ticket.agent1_output, ticket.ag
 return { json: { ...ticket, escalation_signals: signals, escalate: signals.escalate } };
 `.trim();
 
+const jsComputeGroundTruthAgreement = `
+// Ground-truth comparison (spec Section 8 / Section 15 Phase 5). Section 8
+// names three CFPB outcome fields: company response category, timely flag,
+// disputed flag. The live API does not expose a disputed flag at all --
+// confirmed by inspecting real records during this build (CFPB discontinued
+// it from the public schema years ago), not assumed from the spec text.
+// This uses only the two fields that actually exist; the third is reported
+// as explicitly unavailable rather than silently dropped.
+//
+// "Elevated" vs. "routine" is a deliberately coarse, directional proxy --
+// reported as "X% agreement," never as accuracy (spec Section 8's own
+// framing). Note from testing against the three fixtures: all three read as
+// "routine" (Closed with explanation + timely) yet the pipeline correctly
+// escalates all three on narrative/regulatory grounds -- that's not a bug,
+// it's exactly why this must never be read as an accuracy score. CFPB's own
+// outcome categories are coarser than the severity rubric.
+${computeGroundTruthAgreement.toString()}
+
+const ticket = $input.item.json;
+const ground_truth = computeGroundTruthAgreement(ticket, ticket.escalate);
+return { json: { ...ticket, ground_truth } };
+`.trim();
+
 // Both final nodes keep each agent's mocked reasoning output AND the real
 // tool-call result(s) that ran alongside it (when the branch called a tool)
 // side by side -- so a reviewer can cross-check what the mocked "LLM" claimed
@@ -711,6 +799,7 @@ return {
       agent4: { tool_used: t.agent4_tool_used, output: t.agent4_output, tool_result: t.agent4_tool_result || null },
     },
     escalation_signals: t.escalation_signals,
+    ground_truth: t.ground_truth,
   },
 };
 `.trim();
@@ -732,6 +821,7 @@ return {
       agent4: { tool_used: t.agent4_tool_used, output: t.agent4_output, tool_result: t.agent4_tool_result || null },
     },
     escalation_signals: t.escalation_signals,
+    ground_truth: t.ground_truth,
   },
 };
 `.trim();
@@ -768,9 +858,10 @@ const nodes = [
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000013", name: "Tool: Re-verify Clause & CRM Fact", mode: "runOnceForEachItem", jsCode: jsReverifyTool, position: [4040, -260] }),
 
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000014", name: "Compute Escalation Signals", mode: "runOnceForEachItem", jsCode: jsComputeEscalationSignals, position: [4260, -140] }),
-  ifNode({ id: "b2f7d3a1-0000-4000-8000-000000000015", name: "IF: Escalate?", leftValueExpr: "={{ $json.escalate }}", position: [4480, -140], notes: "Deterministic gate (spec Section 7) -- compound OR over five independent signals computed in the previous node, not a fifth agent call." }),
-  codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000016", name: "Final: Escalate to Human Queue", mode: "runOnceForEachItem", jsCode: jsFinalEscalate, position: [4700, -260] }),
-  codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000017", name: "Final: Auto-Resolve", mode: "runOnceForEachItem", jsCode: jsFinalAutoResolve, position: [4700, -20] }),
+  codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000018", name: "Compute Ground-Truth Agreement", mode: "runOnceForEachItem", jsCode: jsComputeGroundTruthAgreement, position: [4480, -140], notes: "Phase 5 (spec Section 8): compares the pipeline's decision against CFPB's own outcome fields. Only company_response and timely exist in the live API -- disputed flag is confirmed unavailable, not silently dropped. Reported as a directional agreement signal, never accuracy." }),
+  ifNode({ id: "b2f7d3a1-0000-4000-8000-000000000015", name: "IF: Escalate?", leftValueExpr: "={{ $json.escalate }}", position: [4700, -140], notes: "Deterministic gate (spec Section 7) -- compound OR over five independent signals computed upstream, not a fifth agent call." }),
+  codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000016", name: "Final: Escalate to Human Queue", mode: "runOnceForEachItem", jsCode: jsFinalEscalate, position: [4920, -260] }),
+  codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000017", name: "Final: Auto-Resolve", mode: "runOnceForEachItem", jsCode: jsFinalAutoResolve, position: [4920, -20] }),
 ];
 
 const connections = [
@@ -804,7 +895,8 @@ const connections = [
   { from: "Tool: Re-verify Clause & CRM Fact", to: "Compute Escalation Signals", fromOutput: 0 },
   { from: "IF: Agent 4 Tool Used?", to: "Compute Escalation Signals", fromOutput: 1 },
 
-  { from: "Compute Escalation Signals", to: "IF: Escalate?", fromOutput: 0 },
+  { from: "Compute Escalation Signals", to: "Compute Ground-Truth Agreement", fromOutput: 0 },
+  { from: "Compute Ground-Truth Agreement", to: "IF: Escalate?", fromOutput: 0 },
   { from: "IF: Escalate?", to: "Final: Escalate to Human Queue", fromOutput: 0 },
   { from: "IF: Escalate?", to: "Final: Auto-Resolve", fromOutput: 1 },
 ];

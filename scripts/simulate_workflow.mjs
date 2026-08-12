@@ -111,6 +111,20 @@ function main() {
     }
   }
 
+  // Phase 5 ground-truth field must be present and carry the documented
+  // "routine but escalated anyway" finding for all three fixtures -- not
+  // silently dropped or quietly flipped.
+  for (const item of escalated) {
+    const gt = item.ground_truth;
+    if (!gt) { failures.push(`${item.complaint_id}: missing ground_truth field on final record`); continue; }
+    if (gt.cfpb_disputed_flag !== "unavailable — CFPB discontinued this field from the public API") {
+      failures.push(`${item.complaint_id}: ground_truth.cfpb_disputed_flag should explicitly say the field is unavailable, got "${gt.cfpb_disputed_flag}"`);
+    }
+    if (gt.ground_truth_signal !== "routine" || gt.agrees_with_ground_truth !== false) {
+      failures.push(`${item.complaint_id}: expected ground_truth_signal="routine" and agrees_with_ground_truth=false, got ${JSON.stringify(gt)}`);
+    }
+  }
+
   // Non-fixture ticket must dead-end, not fabricate a decision. Splice in a
   // fake post-CRM-generation item directly (the simulator doesn't run the
   // real CFPB HTTP Request node) to exercise the shared Route/IF gate.

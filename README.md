@@ -5,7 +5,8 @@ real federal regulation text, a disclosed synthetic CRM layer, and four genuine
 conditional-tool-use LLM agents (n8n native AI/LLM agent nodes) feeding a deterministic
 escalation gate. Full spec: `../Docs/Complaint_Triage_Orchestrator_Spec.md`.
 
-**Status: Phase 3 of 7 complete.** See Section 15 of the spec for the full phase list.
+**Status: Phase 5 of 7 complete.** See Section 15 of the spec for the full phase list.
+(Phase 4's escalation gate was built during Phase 3 — see that section below.)
 
 ## Phase 1 — access, trigger, reference data
 
@@ -274,7 +275,75 @@ current fixture set.
    Ticket (Awaiting Phase 7)` unless a fetched complaint_id happens to be one of the
    three fixtures (it won't be — those are a historical snapshot).
 
-## Not yet built (Phases 4–7)
+## Phase 5 — ground-truth comparison
 
-Ground-truth comparison · Streamlit + Plotly dashboard · verification, including the
-mock-to-real Claude API swap (Phase 7) and the storage/dedup layer flagged in Phase 1.
+Spec Section 8 defines the methodology; Section 15 Phase 5 asks to "pull CFPB's own
+outcome fields, log pipeline decisions alongside them." A new node, `Compute
+Ground-Truth Agreement`, sits between `Compute Escalation Signals` and `IF: Escalate?`
+and attaches a `ground_truth` block to every final record (both escalate and
+auto-resolve paths).
+
+### A build-time finding worth flagging: the "disputed flag" doesn't exist
+
+Section 8 names three CFPB outcome fields to compare against: company response
+category, timely flag, disputed flag. Live API inspection during this phase (fetching
+real complaint records and printing every field, not assuming from the spec text)
+confirms the third one **does not exist** — CFPB discontinued the "Consumer disputed?"
+field from the public Consumer Complaint Database API some years back. A live record
+has exactly: `company_response`, `timely`, plus the ticket fields already in Section
+3a. No `disputed` or `consumer_disputed` key anywhere in the schema, and it doesn't
+appear in the aggregation buckets either (checked during Phase 1's taxonomy work).
+
+`ground_truth.cfpb_disputed_flag` is set to an explicit `"unavailable — CFPB
+discontinued this field from the public API"` string on every record — reported as
+missing, not silently dropped or worked around with a fabricated substitute.
+
+### The comparison methodology, built from what's actually available
+
+With only two of the three named fields real, `computeGroundTruthAgreement` uses a
+deliberately coarse directional proxy — consistent with Section 8's own instruction
+that this must be reported as "X% agreement," never accuracy:
+
+- **`timely === "No"`** → the company missed CFPB's own 15-day response standard — a
+  real signal the case likely needed more than routine handling.
+- **`company_response` mentions "monetary relief"** → CFPB confirms the company paid
+  the consumer something — a real signal the complaint had substance.
+- Anything else (`"Closed with explanation"` + timely) reads as **`"routine"`**.
+
+`agrees_with_ground_truth` is true when an `"elevated"` reading pairs with
+`ESCALATE_TO_HUMAN`, or a `"routine"` reading pairs with `AUTO_RESOLVE`.
+
+### A finding worth sitting with, not smoothing over
+
+All three fixtures share `company_response: "Closed with explanation"` and
+`timely: "Yes"` — both read as `"routine"` under this proxy. All three pipeline
+decisions are `ESCALATE_TO_HUMAN`. **So `agrees_with_ground_truth` is `false` for all
+three fixtures.** This is asserted explicitly in the self-test (not just tolerated) —
+a future change that silently flips it to `true` should be treated as a regression to
+investigate, not a fix to celebrate.
+
+This isn't the pipeline being wrong. It's a direct demonstration of exactly why Section
+8 insists on "directional signal, never accuracy": CFPB's own outcome-category field is
+a coarse administrative label (essentially "the company closed the case and gave an
+explanation," true of the overwhelming majority of complaints regardless of severity),
+while the pipeline's escalation decision draws on the narrative, the real regulation
+text, and the CRM record. A real pilot run's aggregate agreement rate (once storage
+accumulates enough tickets to be meaningful — not yet wired, see Phase 1's dedup note)
+should be read as "how often does CFPB's coarse label happen to line up with a
+richer decision," not as ground truth the pipeline is being graded against.
+
+### Testing
+
+Positive controls confirm the proxy actually discriminates: an untimely response
+correctly reads `"elevated"` and agrees with an escalate decision; `"Closed with
+monetary relief"` correctly reads `"elevated"`; a routine outcome paired with
+auto-resolve correctly agrees. All covered in `scripts/build_workflow.js`'s self-test
+and re-verified end-to-end against the committed workflow JSON by
+`scripts/simulate_workflow.mjs`.
+
+## Not yet built (Phases 6–7)
+
+Streamlit + Plotly dashboard · verification, including the mock-to-real Claude API
+swap (Phase 7) and the storage/dedup layer flagged in Phase 1. The dashboard (Phase 6)
+is also where an aggregate "% agreement" rollup across accumulated tickets would live,
+once storage exists to accumulate them.

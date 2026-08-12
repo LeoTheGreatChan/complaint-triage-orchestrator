@@ -531,6 +531,23 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "// Ground-truth comparison (spec Section 8 / Section 15 Phase 5). Section 8\n// names three CFPB outcome fields: company response category, timely flag,\n// disputed flag. The live API does not expose a disputed flag at all --\n// confirmed by inspecting real records during this build (CFPB discontinued\n// it from the public schema years ago), not assumed from the spec text.\n// This uses only the two fields that actually exist; the third is reported\n// as explicitly unavailable rather than silently dropped.\n//\n// \"Elevated\" vs. \"routine\" is a deliberately coarse, directional proxy --\n// reported as \"X% agreement,\" never as accuracy (spec Section 8's own\n// framing). Note from testing against the three fixtures: all three read as\n// \"routine\" (Closed with explanation + timely) yet the pipeline correctly\n// escalates all three on narrative/regulatory grounds -- that's not a bug,\n// it's exactly why this must never be read as an accuracy score. CFPB's own\n// outcome categories are coarser than the severity rubric.\nfunction computeGroundTruthAgreement(ticket, escalate) {\n  const isTimely = ticket.timely === \"Yes\";\n  const gotMonetaryRelief = /monetary relief/i.test(ticket.company_response || \"\");\n  const groundTruthSignal = (!isTimely || gotMonetaryRelief) ? \"elevated\" : \"routine\";\n  const agreesWithGroundTruth = (escalate && groundTruthSignal === \"elevated\") || (!escalate && groundTruthSignal === \"routine\");\n\n  return {\n    cfpb_company_response: ticket.company_response,\n    cfpb_timely: ticket.timely,\n    cfpb_disputed_flag: \"unavailable — CFPB discontinued this field from the public API\",\n    ground_truth_signal: groundTruthSignal,\n    pipeline_decision: escalate ? \"ESCALATE_TO_HUMAN\" : \"AUTO_RESOLVE\",\n    agrees_with_ground_truth: agreesWithGroundTruth,\n  };\n}\n\nconst ticket = $input.item.json;\nconst ground_truth = computeGroundTruthAgreement(ticket, ticket.escalate);\nreturn { json: { ...ticket, ground_truth } };"
+      },
+      "id": "b2f7d3a1-0000-4000-8000-000000000018",
+      "name": "Compute Ground-Truth Agreement",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4480,
+        -140
+      ],
+      "notesInFlow": true,
+      "notes": "Phase 5 (spec Section 8): compares the pipeline's decision against CFPB's own outcome fields. Only company_response and timely exist in the live API -- disputed flag is confirmed unavailable, not silently dropped. Reported as a directional agreement signal, never accuracy."
+    },
+    {
+      "parameters": {
         "conditions": {
           "options": {
             "caseSensitive": true,
@@ -558,24 +575,24 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        4480,
+        4700,
         -140
       ],
       "notesInFlow": true,
-      "notes": "Deterministic gate (spec Section 7) -- compound OR over five independent signals computed in the previous node, not a fifth agent call."
+      "notes": "Deterministic gate (spec Section 7) -- compound OR over five independent signals computed upstream, not a fifth agent call."
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
         "language": "javaScript",
-        "jsCode": "const t = $input.item.json;\nreturn {\n  json: {\n    complaint_id: t.complaint_id, company: t.company, product: t.product, issue: t.issue,\n    decision: \"ESCALATE_TO_HUMAN\",\n    crm_summary: { account_tier: t.crm.account_tier, tenure_years: t.crm.tenure_years, special_population_flag: t.crm.special_population_flag },\n    agents: {\n      agent1: { tool_used: t.agent1_tool_used, output: t.agent1_output, tool_result: t.agent1_tool_result || null },\n      agent2: {\n        broader_crm_lookup_used: t.agent2_broader_crm_lookup_used, output: t.agent2_output,\n        regulation_tool_result: t.agent2_regulation_tool_result, crm_tool_result: t.agent2_crm_tool_result || null,\n      },\n      agent3: { tool_used: t.agent3_tool_used, output: t.agent3_output, tool_result: t.agent3_tool_result || null },\n      agent4: { tool_used: t.agent4_tool_used, output: t.agent4_output, tool_result: t.agent4_tool_result || null },\n    },\n    escalation_signals: t.escalation_signals,\n  },\n};"
+        "jsCode": "const t = $input.item.json;\nreturn {\n  json: {\n    complaint_id: t.complaint_id, company: t.company, product: t.product, issue: t.issue,\n    decision: \"ESCALATE_TO_HUMAN\",\n    crm_summary: { account_tier: t.crm.account_tier, tenure_years: t.crm.tenure_years, special_population_flag: t.crm.special_population_flag },\n    agents: {\n      agent1: { tool_used: t.agent1_tool_used, output: t.agent1_output, tool_result: t.agent1_tool_result || null },\n      agent2: {\n        broader_crm_lookup_used: t.agent2_broader_crm_lookup_used, output: t.agent2_output,\n        regulation_tool_result: t.agent2_regulation_tool_result, crm_tool_result: t.agent2_crm_tool_result || null,\n      },\n      agent3: { tool_used: t.agent3_tool_used, output: t.agent3_output, tool_result: t.agent3_tool_result || null },\n      agent4: { tool_used: t.agent4_tool_used, output: t.agent4_output, tool_result: t.agent4_tool_result || null },\n    },\n    escalation_signals: t.escalation_signals,\n    ground_truth: t.ground_truth,\n  },\n};"
       },
       "id": "b2f7d3a1-0000-4000-8000-000000000016",
       "name": "Final: Escalate to Human Queue",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4700,
+        4920,
         -260
       ]
     },
@@ -583,14 +600,14 @@
       "parameters": {
         "mode": "runOnceForEachItem",
         "language": "javaScript",
-        "jsCode": "const t = $input.item.json;\nreturn {\n  json: {\n    complaint_id: t.complaint_id, company: t.company, product: t.product, issue: t.issue,\n    decision: \"AUTO_RESOLVE\",\n    draft: t.agent3_output ? t.agent3_output.draft : null,\n    agents: {\n      agent1: { tool_used: t.agent1_tool_used, output: t.agent1_output, tool_result: t.agent1_tool_result || null },\n      agent2: {\n        broader_crm_lookup_used: t.agent2_broader_crm_lookup_used, output: t.agent2_output,\n        regulation_tool_result: t.agent2_regulation_tool_result, crm_tool_result: t.agent2_crm_tool_result || null,\n      },\n      agent3: { tool_used: t.agent3_tool_used, output: t.agent3_output, tool_result: t.agent3_tool_result || null },\n      agent4: { tool_used: t.agent4_tool_used, output: t.agent4_output, tool_result: t.agent4_tool_result || null },\n    },\n    escalation_signals: t.escalation_signals,\n  },\n};"
+        "jsCode": "const t = $input.item.json;\nreturn {\n  json: {\n    complaint_id: t.complaint_id, company: t.company, product: t.product, issue: t.issue,\n    decision: \"AUTO_RESOLVE\",\n    draft: t.agent3_output ? t.agent3_output.draft : null,\n    agents: {\n      agent1: { tool_used: t.agent1_tool_used, output: t.agent1_output, tool_result: t.agent1_tool_result || null },\n      agent2: {\n        broader_crm_lookup_used: t.agent2_broader_crm_lookup_used, output: t.agent2_output,\n        regulation_tool_result: t.agent2_regulation_tool_result, crm_tool_result: t.agent2_crm_tool_result || null,\n      },\n      agent3: { tool_used: t.agent3_tool_used, output: t.agent3_output, tool_result: t.agent3_tool_result || null },\n      agent4: { tool_used: t.agent4_tool_used, output: t.agent4_output, tool_result: t.agent4_tool_result || null },\n    },\n    escalation_signals: t.escalation_signals,\n    ground_truth: t.ground_truth,\n  },\n};"
       },
       "id": "b2f7d3a1-0000-4000-8000-000000000017",
       "name": "Final: Auto-Resolve",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4700,
+        4920,
         -20
       ]
     }
@@ -896,6 +913,17 @@
       ]
     },
     "Compute Escalation Signals": {
+      "main": [
+        [
+          {
+            "node": "Compute Ground-Truth Agreement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Ground-Truth Agreement": {
       "main": [
         [
           {
