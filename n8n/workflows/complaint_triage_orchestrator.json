@@ -108,7 +108,24 @@
         0
       ],
       "notesInFlow": true,
-      "notes": "Phase 1 stops here: capped, flattened batch of new-since-watermark tickets. Phase 2 (synthetic CRM generator), the four agents, escalation gate, and storage/dedup are not yet wired."
+      "notes": "End of Phase 1: capped, flattened batch of new-since-watermark tickets."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Synthetic customer/account record generator (spec Section 3c).\n//\n// Structured like a real bank CRM export -- tenure, tier, holdings, balance,\n// contact history -- but every field is synthetic EXCEPT linked_complaint_id\n// (the real CFPB complaint ID) and the two flags below, which carry forward\n// CFPB's own real `tags` field where it exists. That carry-forward is the\n// deliberately-real part of an otherwise-synthetic record (spec Section 12) --\n// never blur it with the rest, and never let this record be mistaken for a\n// real CRM export in any downstream dashboard/report (Section 14).\n//\n// Deterministic, not random-per-run: seeded from complaint_id (mulberry32 PRNG)\n// so re-processing the same ticket -- a retry, a re-run, a dedup pass hitting\n// the same complaint_id twice because of the date-level watermark overlap\n// noted upstream -- always yields the same synthetic record instead of a new\n// random one each time.\n\nfunction mulberry32(seed) {\n  return function () {\n    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;\n    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);\n    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;\n    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;\n  };\n}\n\nfunction seedFromString(str) {\n  let h = 2166136261;\n  for (let i = 0; i < str.length; i++) {\n    h ^= str.charCodeAt(i);\n    h = Math.imul(h, 16777619);\n  }\n  return h >>> 0;\n}\n\nfunction weightedPick(rng, weighted) {\n  const total = weighted.reduce((s, [, w]) => s + w, 0);\n  let r = rng() * total;\n  for (const [value, weight] of weighted) {\n    if (r < weight) return value;\n    r -= weight;\n  }\n  return weighted[weighted.length - 1][0];\n}\n\nconst PRODUCT_POOL = [\n  'Checking Account', 'Savings Account', 'Credit Card', 'Personal Loan',\n  'Auto Loan', 'Mortgage', 'Home Equity Line of Credit', 'Certificate of Deposit',\n];\n\nconst items = $input.all();\n\nconst out = items.map((item) => {\n  const ticket = item.json;\n  const rng = mulberry32(seedFromString(String(ticket.complaint_id)));\n\n  const tenure_years = weightedPick(rng, [[0,3],[1,4],[2,4],[3,4],[4,3],[5,3],[6,2],[7,2],[8,1],[9,1],[10,1],[12,1],[15,1]]);\n  const received = new Date(ticket.date_received);\n  const since = new Date(received);\n  since.setUTCFullYear(since.getUTCFullYear() - tenure_years);\n  since.setUTCMonth(Math.floor(rng() * 12));\n  since.setUTCDate(1 + Math.floor(rng() * 28));\n  const customer_since = since.toISOString().slice(0, 10);\n\n  const account_tier = weightedPick(rng, [['Standard', 7], ['Preferred', 2], ['Premier', 1]]);\n\n  const holdingsCount = weightedPick(rng, [[1, 5], [2, 3], [3, 1], [4, 1]]);\n  const shuffled = [...PRODUCT_POOL].sort(() => rng() - 0.5);\n  const product_holdings = shuffled.slice(0, holdingsCount);\n\n  const outstanding_balance_usd = weightedPick(rng, [[0, 3], [1, 1]]) === 0\n    ? 0\n    : Math.round(rng() * 15000 * 100) / 100;\n\n  const prior_complaints_12mo = weightedPick(rng, [[0, 6], [1, 2], [2, 1], [3, 1]]);\n  const prior_contacts_90d = weightedPick(rng, [[0, 4], [1, 3], [2, 2], [3, 1], [4, 1]]);\n  const preferred_channel = weightedPick(rng, [['Web', 5], ['Phone', 3], ['Mail', 1]]);\n\n  // Real-tag carry-forward (spec Section 3c/12). CFPB's own `tags` field is\n  // real government data, not synthetic. Values seen in the wild: null,\n  // \"Servicemember\", \"Older American\", or \"Older American, Servicemember\".\n  // special_population_flag is the broader of the two -- CFPB itself treats\n  // servicemembers and older Americans together as populations warranting\n  // extra-care handling, so a Servicemember tag sets both flags true.\n  const tags = ticket.tags || '';\n  const servicemember_flag = tags.includes('Servicemember');\n  const special_population_flag = tags.includes('Servicemember') || tags.includes('Older American');\n\n  return {\n    json: {\n      ...ticket,\n      crm: {\n        account_id: `SYN-${seedFromString(String(ticket.complaint_id)).toString(36).toUpperCase()}`,\n        linked_complaint_id: String(ticket.complaint_id),\n        customer_since,\n        tenure_years,\n        account_tier,\n        product_holdings,\n        outstanding_balance_usd,\n        prior_complaints_12mo,\n        prior_contacts_90d,\n        preferred_channel,\n        servicemember_flag,\n        special_population_flag,\n      },\n    },\n  };\n});\n\nreturn out;\n"
+      },
+      "id": "a1e6c2f0-1a2b-4c3d-8e4f-000000000006",
+      "name": "Generate Synthetic CRM Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        0
+      ],
+      "notesInFlow": true,
+      "notes": "Phase 2. Adds a synthetic CRM record (spec Section 3c) per ticket under `crm`. Only linked_complaint_id, servicemember_flag, and special_population_flag are real/hybrid -- everything else in `crm` is synthetic (Section 12) and must be labelled as such wherever it surfaces downstream (dashboard, README -- Section 14). End of Phase 2: agents, escalation gate, and storage/dedup are not yet wired."
     }
   ],
   "connections": {
@@ -150,6 +167,17 @@
         [
           {
             "node": "Cap Batch & Advance Watermark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cap Batch & Advance Watermark": {
+      "main": [
+        [
+          {
+            "node": "Generate Synthetic CRM Record",
             "type": "main",
             "index": 0
           }

@@ -5,7 +5,7 @@ real federal regulation text, a disclosed synthetic CRM layer, and four genuine
 conditional-tool-use LLM agents (n8n native AI/LLM agent nodes) feeding a deterministic
 escalation gate. Full spec: `../Docs/Complaint_Triage_Orchestrator_Spec.md`.
 
-**Status: Phase 1 of 7 complete.** See Section 15 of the spec for the full phase list.
+**Status: Phase 2 of 7 complete.** See Section 15 of the spec for the full phase list.
 
 ## Phase 1 — access, trigger, reference data
 
@@ -47,8 +47,35 @@ live CFPB data pulled during this phase.
    flattens each Elasticsearch hit down to the spec's Section 3a fields, and advances
    `lastWatermarkDate` to the latest `date_received` actually seen.
 
-Phase 1 stops at step 4's output: a capped, flattened batch of tickets. No CRM
-generation, no agents, no escalation gate, no storage yet — those are Phases 2–7.
+Phase 1 stops at step 4's output: a capped, flattened batch of tickets.
+
+5. **Generate Synthetic CRM Record** (Code node) — adds a `crm` object per ticket per
+   the Section 3c schema. Deterministic: seeded from `complaint_id` (mulberry32 PRNG),
+   so re-processing the same ticket always yields the same synthetic record instead of
+   a new random one each run — important given the watermark overlap noted below can
+   legitimately hand the same ticket to this node more than once. Every `crm` field is
+   synthetic **except** `linked_complaint_id` (the real CFPB complaint ID) and
+   `servicemember_flag` / `special_population_flag`, which carry forward CFPB's own
+   real `tags` field where present (`"Servicemember"`, `"Older American"`, or both) —
+   the hybrid rule from spec Section 3c/12. No agents, no escalation gate, no storage
+   yet — those are Phases 3–7.
+
+### Phase 2 design note: the generator vs. the Section 6 fixtures
+
+This generator produces synthetic data for whatever real tickets Phase 1 fetches live
+— it does **not** try to reproduce the exact CRM values in spec Section 6's worked
+Ticket A/B/C table (tenure 6/1/3yrs, 1/1/2 products, $2,340/$0/$0 balance). Those three
+are fixed fixtures for Phase 3's mock-agent testing, from a fixed historical CFPB
+snapshot (complaint IDs in the 9999970s) that a live poll today won't encounter — Phase
+3 will hardcode them directly rather than asking this generator to special-case three
+IDs. Same schema either way, so the fixtures stay a drop-in match for what production
+data will actually look like once the mock-to-real swap happens (Section 15 Phase 7).
+
+`special_population_flag` also folds in the Servicemember tag, not just Older American
+— the spec's field description ("Same hybrid rule (Servicemember / Older American
+tags)") reads as the broader of the two flags, and CFPB's own supervisory language
+treats servicemembers and older Americans together as populations warranting
+extra-care handling. Worth confirming that reading is what you intended.
 
 ### A build-time finding worth flagging before Phase 2
 
@@ -77,8 +104,8 @@ it's load-bearing, not a nice-to-have, given this watermark behavior.
   the pilot's two products (confirmed `sum_other_doc_count: 0`), so the cached taxonomy
   file is complete, not a sample.
 
-## Not yet built (Phases 2–7)
+## Not yet built (Phases 3–7)
 
-Synthetic CRM record generator · four LLM agents (mock-first against the Section 6
-fixtures, then a real Claude API swap) · deterministic escalation gate · ground-truth
-comparison · Streamlit + Plotly dashboard · verification.
+Four LLM agents (mock-first against the Section 6 fixtures, then a real Claude API
+swap) · deterministic escalation gate · ground-truth comparison · Streamlit + Plotly
+dashboard · verification.
