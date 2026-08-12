@@ -5,7 +5,7 @@ real federal regulation text, a disclosed synthetic CRM layer, and four genuine
 conditional-tool-use LLM agents (n8n native AI/LLM agent nodes) feeding a deterministic
 escalation gate. Full spec: `../Docs/Complaint_Triage_Orchestrator_Spec.md`.
 
-**Status: Phase 2 of 7 complete.** See Section 15 of the spec for the full phase list.
+**Status: Phase 3 of 7 complete.** See Section 15 of the spec for the full phase list.
 
 ## Phase 1 — access, trigger, reference data
 
@@ -110,8 +110,134 @@ it's load-bearing, not a nice-to-have, given this watermark behavior.
   the pilot's two products (confirmed `sum_other_doc_count: 0`), so the cached taxonomy
   file is complete, not a sample.
 
-## Not yet built (Phases 3–7)
+## Phase 3 — four agents, mock-first, plus the escalation gate
 
-Four LLM agents (mock-first against the Section 6 fixtures, then a real Claude API
-swap) · deterministic escalation gate · ground-truth comparison · Streamlit + Plotly
-dashboard · verification.
+Spec Section 15 groups the escalation gate into the same Phase 3 verification pass as
+the agents ("Build and debug the full orchestration, tool-use branching, and escalation
+gate against known-good fixture data") — you can't validate end-to-end orchestration
+without it, so it's built here rather than held back for Phase 4. Flagging that
+explicitly rather than quietly declaring Phase 4 done without saying so.
+
+**How this is built, and why:** every Code node's logic is a real, tested JS function
+defined once in [`scripts/build_workflow.js`](scripts/build_workflow.js), unit-tested
+against the three spec fixtures (plus a negative control) in that same script's
+self-test section, then embedded into the n8n workflow JSON via
+`Function.prototype.toString()`. The code that's tested and the code that ships inside
+the workflow are byte-identical — no hand-retyping into a JSON string, no risk of the
+two drifting apart. The script refuses to write the workflow file if any assertion
+fails. Re-run it any time with:
+
+```bash
+node scripts/build_workflow.js
+```
+
+It owns and idempotently regenerates every Phase 3 node/connection; Phase 1/2 nodes are
+left untouched.
+
+**Verification beyond the self-test:** [`scripts/simulate_workflow.mjs`](scripts/simulate_workflow.mjs)
+is a minimal n8n execution simulator — it loads the *committed* workflow JSON and
+executes it node-by-node following its actual `connections` graph, including real
+IF-node branching, exactly as n8n would. This proves the exported file itself works,
+not just the generator's in-memory logic. Run it with:
+
+```bash
+node scripts/simulate_workflow.mjs
+```
+
+All three fixtures reach the real escalation-gate IF node and escalate; a non-fixture
+ticket correctly dead-ends instead of fabricating a decision; Ticket A's Agent 3/4 tool
+calls independently pulled the real, matching §1692g(b) verbatim text from the cached
+regulation corpus; Ticket C's Agent 1 taxonomy tool call reproduced the exact Phase 1
+finding live (confirms the real sub-issue, and its siblings do **not** include an
+"identity theft or fraud" entry).
+
+### Architecture
+
+**Fixture test harness** (new): a second Manual Trigger, `Fixture Test Trigger (A/B/C)`,
+feeds the three literal Section 3a/3c tickets — bypassing the live CFPB fetch and
+random CRM generation — into `Route: Fixture or Live?` → `IF: Is Fixture Ticket?`, the
+same gate the live pipeline's output passes through. Phase 3's mock agents only have
+known-good fixture data for Tickets A/B/C; anything else (i.e. every live ticket Phase
+1 actually fetches) routes to `Live Ticket (Awaiting Phase 7)` — a clearly-labelled
+dead end — rather than fabricating a result. **This means the live Schedule/Manual
+trigger path doesn't produce real triage decisions yet; only the fixture path is fully
+exercised until Phase 7's Claude API swap.**
+
+**Per agent, the same repeating shape:** `Agent N: Mock Decision` (Code node — the
+mocked reasoning layer, keyed by `complaint_id` against the exact Section 6/v5 fixture
+outputs) → `IF: Agent N Tool Used?` → the real tool, when the fixture says the agent
+used it, or a direct pass-through when it didn't. Every tool actually runs against the
+real cached reference data (Phase 1) and the real synthetic CRM record (Phase 2) — only
+the reasoning/decision layer is mocked, not the tools. That conditional branching is a
+real IF node on the n8n canvas for each agent, not logic buried inside one opaque Code
+node, since the spec calls that conditionality "the actual point of the build."
+
+| Agent | Tool(s) | Real tool logic |
+|---|---|---|
+| 1 Classification | CFPB taxonomy lookup | Searches both issue- and sub-issue-level names in the cached taxonomy; returns real siblings |
+| 2 Research | Special-population check (**always**, spec v5) + regulation-index search (**always**) + broader CRM context (discretionary) | Special-population: direct deterministic CRM read. Regulation index: keyword + light synonym search across the five regulations' cached topics — not semantic search, see limitation below. Broader CRM: raw tenure/tier/holdings/balance/prior-complaints pull |
+| 3 Drafting | Exact regulation clause fetch | Parses a citation like `15 U.S.C. §1692g(b)`, extracts just that lettered subsection from the cached verbatim text |
+| 4 QA/scoring | Re-verify clause + CRM fact | Re-runs the same clause-fetch independently, plus re-reads the raw CRM field Agent 2's `customer_context` referenced — catches drift between a draft's paraphrase and the actual record |
+
+**Escalation gate:** `Compute Escalation Signals` (Code node — the deterministic
+Section 7 compound-OR logic, explicitly *not* a fifth agent call, over the four agents'
+already-produced structured outputs) → `IF: Escalate?` → `Final: Escalate to Human
+Queue` or `Final: Auto-Resolve`. Both final nodes retain every agent's mocked output
+*and* the real tool-call result alongside it, so a reviewer can cross-check what the
+mock claimed against what the real cached data actually says — most of Phase 3's
+audit value lives in that side-by-side, not in the mocked reasoning itself.
+
+### Two interpretation calls made building the gate — worth confirming against intent
+
+Spec Section 7 names five OR conditions but doesn't pin down two of them to specific
+data fields:
+
+1. **"Stated monetary exposure exceeds $500"** is read as `crm.outstanding_balance_usd`
+   — the only concrete dollar figure the pipeline has in structured form, rather than
+   parsing the free-text narrative for a dollar amount (which would need an LLM, not a
+   deterministic IF-node, contradicting the "not a fifth agent call" requirement).
+   Ticket A ($2,340 balance) hits this threshold on top of `requires_human`/low
+   confidence, which is consistent with the spec's own note that none of the three
+   trigger the *high-value* path specifically — it doesn't say none trigger monetary
+   exposure.
+2. **"High-risk issue type"** is detected via keyword match against Agent 1's classified
+   issue text and Agent 2's regulation citation, plus a direct check for the FCRA
+   §1681c-2 citation itself as a high-risk marker (since that section *is* the
+   identity-theft block procedure) — not a fresh re-read of the narrative.
+
+### An honest limitation: the regulation-index tool is lexical, not semantic
+
+Agent 2's "always used" regulation search is keyword + a small hand-written synonym map
+(`fraud`/`fraudulent`/`identity`/`theft`/`unauthorized` → `identity-theft`, etc.), not
+real semantic search. Without the synonym step it doesn't reliably surface FCRA
+§1681c-2 from narrative language like "believed fraudulent" — the topic string itself
+says "Identity-theft block procedure," not "fraudulent." Documented rather than
+smoothed over: a real Claude-backed tool call at Phase 7 would do this better without
+a bespoke synonym table.
+
+### Known untested branches — same honesty standard as the spec's own flagged gap
+
+Spec v5 itself flags that all three worked tickets warrant Agent 2's broader CRM
+lookup, so no fixture exercises the "flag checked, broader lookup skipped" case
+(Section 6, "One honest gap"). Building on that same standard: **Agent 3's and Agent
+4's tool-skip branches are equally untested** here — all three fixtures cite a
+regulation and make a checkable claim, so the `false` output of `IF: Agent 3/4 Tool
+Used?` is structurally present in the workflow (and will work correctly, per its own
+logic) but never exercised end-to-end by the current fixture set. Same Phase 7
+verification item as the spec's own flagged gap — worth testing against a real ticket
+that doesn't hit these paths, not just against A/B/C.
+
+### How to run
+
+1. Import [`n8n/workflows/complaint_triage_orchestrator.json`](n8n/workflows/complaint_triage_orchestrator.json)
+   into n8n (Workflows → Import from File) — no credentials needed.
+2. Run **Fixture Test Trigger (A/B/C)** manually. All three items should reach `Final:
+   Escalate to Human Queue`.
+3. Running **Manual Trigger** (the live path) will currently route everything to `Live
+   Ticket (Awaiting Phase 7)` unless a fetched complaint_id happens to be one of the
+   three fixtures (it won't be — those are a historical snapshot).
+
+## Not yet built (Phases 4–7)
+
+Ground-truth comparison · Streamlit + Plotly dashboard · verification, including the
+mock-to-real Claude API swap (Phase 7) and the storage/dedup layer flagged in Phase 1.
