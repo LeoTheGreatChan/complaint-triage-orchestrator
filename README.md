@@ -187,45 +187,82 @@ Queue` or `Final: Auto-Resolve`. Both final nodes retain every agent's mocked ou
 mock claimed against what the real cached data actually says — most of Phase 3's
 audit value lives in that side-by-side, not in the mocked reasoning itself.
 
-### Two interpretation calls made building the gate — worth confirming against intent
+### The two interpretation calls — resolved in spec v6/v7, implementation updated to match
 
-Spec Section 7 names five OR conditions but doesn't pin down two of them to specific
-data fields:
+1. **"Stated monetary exposure exceeds $500" — narrative-extracted only, `crm.outstanding_balance_usd` excluded (v7).**
+   The Phase 3 build originally read this as `crm.outstanding_balance_usd`; rejected.
+   Reason: balance already has its own independent trigger via `isHighValueAccount`
+   (`outstanding_balance_usd ≥ $10,000`), so reusing the same field here would
+   double-count one number under two labels. `Compute Escalation Signals` now runs a
+   best-effort dollar-figure regex (`\$\s?[\d,]+(?:\.\d{1,2})?`) against
+   `complaint_what_happened` and takes the largest match; if the narrative states no
+   amount, this condition simply doesn't fire — the ticket still has four other
+   independent escalation paths. None of the three fixture narratives state a dollar
+   figure, so `exceedsMonetaryThreshold` is `false` for all three post-fix — Ticket A
+   now escalates on `requires_human` alone, matching the spec's own per-ticket
+   annotation exactly (previously the CRM-balance interpretation added an extra,
+   spec-uncited reason). A positive control (`"$750 that I never authorized"` on an
+   otherwise clean ticket) and a negative control (a clean ticket with a **$9,000 CRM
+   balance**, confirming that balance no longer leaks into this trigger) are both in
+   the self-test.
+2. **"High-risk issue type" — explicit list drawn from the real cached taxonomy, plus a citation marker (v6).**
+   Replaced the original loose keyword-substring match (`"fraud"`, `"threat"`,
+   `"elder"`, ...) with `HIGH_RISK_ISSUES`, an explicit set of real issue/sub-issue
+   strings pulled directly from `reference_data/taxonomy/cfpb_taxonomy.json` —
+   FDCPA threat/harassment sub-issues (e.g. `"Threatened to arrest you or take you to
+   jail if you do not pay"`, `"Used obscene, profane, or other abusive language"`) and
+   identity-theft issues/sub-issues (`"Identity theft / Fraud / Embezzlement"`, `"Debt
+   was result of identity theft"`). Checked only against Agent 1's classified
+   issue/sub_issue value — never the raw narrative — per spec Section 7's explicit
+   instruction not to repeat Ticket C's original failure mode of pattern-matching
+   surface wording instead of trusting the structured classification. Tickets B and C
+   don't actually match this list by issue text (their classified issues are
+   `"Attempts to collect debt not owed"` and `"Card opened without my consent or
+   knowledge"`, neither of which is itself taxonomy-labelled as identity-theft) — they
+   trigger instead via `HIGH_RISK_CITATION_MARKERS` (`"1681c-2"`, FCRA's identity-theft
+   block procedure citation), the "and/or Agent 2's citation" half of the spec's rule.
+   A positive control confirms the issue-list path independently (a threat-issue
+   ticket with an unrelated citation still trips `isHighRiskIssue`).
 
-1. **"Stated monetary exposure exceeds $500"** is read as `crm.outstanding_balance_usd`
-   — the only concrete dollar figure the pipeline has in structured form, rather than
-   parsing the free-text narrative for a dollar amount (which would need an LLM, not a
-   deterministic IF-node, contradicting the "not a fifth agent call" requirement).
-   Ticket A ($2,340 balance) hits this threshold on top of `requires_human`/low
-   confidence, which is consistent with the spec's own note that none of the three
-   trigger the *high-value* path specifically — it doesn't say none trigger monetary
-   exposure.
-2. **"High-risk issue type"** is detected via keyword match against Agent 1's classified
-   issue text and Agent 2's regulation citation, plus a direct check for the FCRA
-   §1681c-2 citation itself as a high-risk marker (since that section *is* the
-   identity-theft block procedure) — not a fresh re-read of the narrative.
+### The regulation-index tool: a real, acknowledged limitation — now partially mitigated (v6)
 
-### An honest limitation: the regulation-index tool is lexical, not semantic
+Agent 2's "always used" regulation search is keyword + synonym, not real semantic
+search — confirmed as a genuine limitation, not a false alarm. Two responses, both
+implemented:
 
-Agent 2's "always used" regulation search is keyword + a small hand-written synonym map
-(`fraud`/`fraudulent`/`identity`/`theft`/`unauthorized` → `identity-theft`, etc.), not
-real semantic search. Without the synonym step it doesn't reliably surface FCRA
-§1681c-2 from narrative language like "believed fraudulent" — the topic string itself
-says "Identity-theft block procedure," not "fraudulent." Documented rather than
-smoothed over: a real Claude-backed tool call at Phase 7 would do this better without
-a bespoke synonym table.
+- **Phrase-level synonym seeding from the fixtures' own language.** The original
+  single-token synonym map couldn't handle short/contraction-heavy phrases like `"not
+  mine"` or `"don't recognize"` (splitting on `'` shreds `"don't"` into `"don"` + `"t"`,
+  both too short to match). `REGULATION_SEARCH_PHRASE_SYNONYMS` now does substring
+  phrase matching instead: `"fraudulent"` / `"not mine"` / `"don't recognize"` /
+  `"identity theft"` / `"unauthorized"` → adds `identity-theft`; `"didn't receive"` /
+  `"never got"` / `"no notice"` / `"without notice"` → adds `validation`. Seeded
+  directly from spec Section 9's examples, not invented in the abstract.
+- **Documented, not smoothed over.** The tool remains lexical; a real Claude-backed
+  tool call at Phase 7 would do this better without a bespoke phrase table. Per spec
+  v6, the Phase 6 dashboard's citation-accuracy metric will need the explicit caveat
+  that its ceiling is bounded by this tool's vocabulary coverage, not purely by agent
+  reasoning quality — noted here for whichever phase builds that metric, since Phase 3
+  doesn't reach the dashboard.
 
-### Known untested branches — same honesty standard as the spec's own flagged gap
+### Untested branches — consolidated into one Phase 7 checklist, with cause traced (v6)
 
-Spec v5 itself flags that all three worked tickets warrant Agent 2's broader CRM
-lookup, so no fixture exercises the "flag checked, broader lookup skipped" case
-(Section 6, "One honest gap"). Building on that same standard: **Agent 3's and Agent
-4's tool-skip branches are equally untested** here — all three fixtures cite a
-regulation and make a checkable claim, so the `false` output of `IF: Agent 3/4 Tool
-Used?` is structurally present in the workflow (and will work correctly, per its own
-logic) but never exercised end-to-end by the current fixture set. Same Phase 7
-verification item as the spec's own flagged gap — worth testing against a real ticket
-that doesn't hit these paths, not just against A/B/C.
+Three branches share one root cause, now stated as a single checklist rather than
+three separate notes: **the Ticket C compound-issue fix (spec Section 6) is what
+removed the fixtures' only examples of Agent 3 and Agent 4 skipping their tools** — the
+original, incorrect version of Ticket C didn't cite a regulation; correcting it gave
+Ticket C a citation too, which is correct for Ticket C's classification but had the
+side effect of eliminating the only fixture that exercised those two `false` branches.
+Confirm all three against a real ticket at Phase 7, not just against A/B/C:
+
+- Agent 2's broader CRM-context lookup being skipped (only the always-on
+  `special_population_flag` check is guaranteed across all three fixtures).
+- Agent 3 drafting without citing a regulation.
+- Agent 4 scoring without verifying a claim.
+
+All three are structurally present and correctly wired in the workflow (`IF: Agent 2/3/4
+Tool Used?`'s `false` output each routes correctly) — they're just never taken by the
+current fixture set.
 
 ### How to run
 

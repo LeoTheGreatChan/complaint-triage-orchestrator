@@ -194,10 +194,23 @@ const REGULATION_SEARCH_SYNONYMS = {
   wrong: "billing-error", incorrect: "billing-error", error: "billing-error",
   validate: "validation", validating: "validation",
 };
+// Multi-word / contraction phrases the single-token matcher above can't
+// catch (words too short once split, e.g. "don't" -> "don" + "t"). Seeded
+// directly from the three fixture narratives' actual language (spec v6/v7,
+// Section 9's note) rather than invented in the abstract, so the known
+// citation matches (Ticket B/C -> FCRA identity-theft block procedure) hold
+// even when the exact wording drifts slightly on a real ticket.
+const REGULATION_SEARCH_PHRASE_SYNONYMS = [
+  { phrases: ["fraudulent", "not mine", "don't recognize", "do not recognize", "identity theft", "unauthorized"], addsTerm: "identity-theft" },
+  { phrases: ["didn't receive", "did not receive", "never received", "never got", "never sent", "no notice", "without notice"], addsTerm: "validation" },
+];
 
-function regulationIndexLookup(regulationMetaIndex, stopwords, synonyms, queryText) {
-  const rawTerms = queryText.toLowerCase().split(/[^a-z-]+/).filter((t) => t.length > 4 && !stopwords.has(t));
-  const terms = [...new Set(rawTerms.flatMap((t) => [t, synonyms[t]].filter(Boolean)))];
+function regulationIndexLookup(regulationMetaIndex, stopwords, synonyms, phraseSynonyms, queryText) {
+  const lowerQuery = queryText.toLowerCase();
+  const rawTerms = lowerQuery.split(/[^a-z-]+/).filter((t) => t.length > 4 && !stopwords.has(t));
+  const tokenTerms = rawTerms.flatMap((t) => [t, synonyms[t]].filter(Boolean));
+  const phraseTerms = phraseSynonyms.filter((ps) => ps.phrases.some((p) => lowerQuery.includes(p))).map((ps) => ps.addsTerm);
+  const terms = [...new Set([...tokenTerms, ...phraseTerms])];
   const matches = [];
   for (const [id, meta] of Object.entries(regulationMetaIndex)) {
     const haystack = meta.topic.toLowerCase();
@@ -236,17 +249,66 @@ function fetchExactClause(regulations, citationToFile, citation) {
   return { found: true, citation, subsection: letter, clause_text: text.slice(startIdx, endIdx).trim(), source_citation: doc._meta.citation };
 }
 
-const HIGH_RISK_KEYWORDS = ["identity theft", "fraud", "fraudulent", "elder", "older american", "harassment", "threat"];
+// Explicit high-risk issue/sub-issue list (spec v6/v7, Section 7): drawn from
+// the REAL cached taxonomy (reference_data/taxonomy/cfpb_taxonomy.json), not
+// a generic keyword list. Covers identity theft/fraud and FDCPA
+// harassment/threat categories the taxonomy actually contains under the
+// pilot's two products. Matched against Agent 1's classified issue/sub_issue
+// values only -- never the raw narrative text, which would repeat Ticket C's
+// original failure mode of pattern-matching on surface wording instead of
+// trusting the structured classification.
+const HIGH_RISK_ISSUES = new Set([
+  // Debt collection -- "Took or threatened to take negative or legal action"
+  "Took or threatened to take negative or legal action",
+  "Threatened or suggested your credit would be damaged",
+  "Threatened to sue you for very old debt",
+  "Threatened to arrest you or take you to jail if you do not pay",
+  "Threatened to turn you in to immigration or deport you",
+  // Debt collection -- "Communication tactics" / electronic communications
+  "Used obscene, profane, or other abusive language",
+  "Used obscene/profane/abusive language",
+  // Debt collection -- "Threatened to contact someone or share information improperly"
+  "Threatened to contact someone or share information improperly",
+  // Debt collection -- "Taking/threatening an illegal action"
+  "Taking/threatening an illegal action",
+  "Threatened to sue on too old debt",
+  "Threatened arrest/jail if do not pay",
+  // Debt collection -- identity-theft sub-issues
+  "Debt was result of identity theft",
+  "Debt resulted from identity theft",
+  // Credit card -- identity theft / fraud issues
+  "Identity theft / Fraud / Embezzlement",
+  "Problem with fraud alerts or security freezes",
+  "Credit monitoring or identity theft protection services",
+]);
+// A citation to FCRA's identity-theft block procedure is itself a high-risk
+// marker, independent of what Agent 1 classified the issue as (spec Section
+// 6/7) -- this is how Tickets B and C actually trigger this signal, since
+// neither ticket's classified issue text literally appears in the list above.
+const HIGH_RISK_CITATION_MARKERS = ["1681c-2"];
 
-function computeEscalationSignals(ticket, agent1Output, agent2Output, agent4Output) {
+// Best-effort dollar-amount extraction from the complaint narrative (spec
+// v7, Section 7): "$1,234.56" style figures only. Returns the largest amount
+// found, or null if the narrative states none -- in which case this
+// condition simply doesn't fire; the ticket still has four other independent
+// escalation paths.
+function extractNarrativeMonetaryExposure(narrativeText) {
+  if (!narrativeText) return null;
+  const matches = narrativeText.match(/\$\s?[\d,]+(?:\.\d{1,2})?/g);
+  if (!matches) return null;
+  const amounts = matches.map((m) => parseFloat(m.replace(/[$,\s]/g, "")));
+  return Math.max(...amounts);
+}
+
+function computeEscalationSignals(ticket, agent1Output, agent2Output, agent4Output, highRiskIssues, highRiskCitationMarkers) {
   const requiresHuman = agent4Output.requires_human === true;
   const lowConfidence = agent4Output.confidence < 0.7;
 
-  const issueTexts = (agent1Output.issues ? agent1Output.issues.map((i) => i.issue) : [agent1Output.issue]).join(" ").toLowerCase();
-  const regulationText = `${agent2Output.applicable_regulation || ""} ${agent2Output.citation || ""}`.toLowerCase();
-  const isHighRiskIssue =
-    HIGH_RISK_KEYWORDS.some((kw) => issueTexts.includes(kw) || regulationText.includes(kw)) ||
-    regulationText.includes("1681c-2");
+  const classifiedIssues = agent1Output.issues ? agent1Output.issues.map((i) => i.issue) : [agent1Output.issue];
+  const matchesHighRiskIssue = classifiedIssues.some((issue) => highRiskIssues.has(issue));
+  const regulationText = `${agent2Output.applicable_regulation || ""} ${agent2Output.citation || ""}`;
+  const matchesHighRiskCitation = highRiskCitationMarkers.some((marker) => regulationText.includes(marker));
+  const isHighRiskIssue = matchesHighRiskIssue || matchesHighRiskCitation;
 
   const isRepeatComplainant = ticket.crm.prior_complaints_12mo >= 2;
   const isHighValueAccount =
@@ -254,8 +316,12 @@ function computeEscalationSignals(ticket, agent1Output, agent2Output, agent4Outp
     (ticket.crm.tenure_years >= 5 && ticket.crm.product_holdings.length >= 2) ||
     ticket.crm.outstanding_balance_usd >= 10000;
 
-  const statedMonetaryExposure = ticket.crm.outstanding_balance_usd;
-  const exceedsMonetaryThreshold = statedMonetaryExposure > 500;
+  // Narrative-extracted only -- CRM balance deliberately excluded (spec v7):
+  // outstanding_balance_usd already has its own independent trigger via
+  // isHighValueAccount, so reusing it here would double-count the same
+  // number under two different labels.
+  const statedMonetaryExposure = extractNarrativeMonetaryExposure(ticket.complaint_what_happened);
+  const exceedsMonetaryThreshold = statedMonetaryExposure !== null && statedMonetaryExposure > 500;
 
   const escalate = requiresHuman || lowConfidence || isHighRiskIssue || isRepeatComplainant || isHighValueAccount || exceedsMonetaryThreshold;
 
@@ -276,7 +342,7 @@ function runPipeline(ticket) {
   const a2fixture = AGENT2_FIXTURES[ticket.complaint_id];
   const special_population_flag = Boolean(ticket.crm.special_population_flag);
   const regulation_tool_result = regulationIndexLookup(
-    REGULATION_META_INDEX, REGULATION_SEARCH_STOPWORDS, REGULATION_SEARCH_SYNONYMS,
+    REGULATION_META_INDEX, REGULATION_SEARCH_STOPWORDS, REGULATION_SEARCH_SYNONYMS, REGULATION_SEARCH_PHRASE_SYNONYMS,
     `${ticket.issue} ${agent1_output.primary_issue || agent1_output.issue} ${ticket.complaint_what_happened}`
   );
   const agent2_output = { special_population_flag, ...a2fixture.output };
@@ -291,7 +357,7 @@ function runPipeline(ticket) {
     ? { clause_reverified: fetchExactClause(REGULATIONS, CITATION_TO_FILE, a4fixture.reverify_clause), crm_fact_reverified: { field: a4fixture.reverify_crm_field, value: ticket.crm[a4fixture.reverify_crm_field] } }
     : null;
 
-  const signals = computeEscalationSignals(ticket, agent1_output, agent2_output, agent4_output);
+  const signals = computeEscalationSignals(ticket, agent1_output, agent2_output, agent4_output, HIGH_RISK_ISSUES, HIGH_RISK_CITATION_MARKERS);
 
   return { agent1_output, agent1_tool_result, agent2_output, regulation_tool_result, agent3_output, agent3_tool_result, agent4_output, agent4_tool_result, signals };
 }
@@ -314,15 +380,44 @@ function selfTest() {
     failures.push("Ticket C taxonomy siblings unexpectedly include an identity-theft entry -- real taxonomy should not have this (see Phase 1 finding)");
   }
 
-  // Negative control: a clean, low-severity ticket must NOT escalate.
-  const cleanTicket = { crm: { tenure_years: 2, account_tier: "Standard", product_holdings: ["Checking Account"], outstanding_balance_usd: 50, prior_complaints_12mo: 0 } };
+  // Negative control: a clean, low-severity ticket must NOT escalate. Also
+  // confirms a large CRM balance does NOT leak into the monetary-exposure
+  // trigger post-v7 (that field now belongs solely to isHighValueAccount).
+  const cleanTicket = { complaint_what_happened: "Called to ask a question about my statement.", crm: { tenure_years: 2, account_tier: "Standard", product_holdings: ["Checking Account"], outstanding_balance_usd: 9000, prior_complaints_12mo: 0 } };
   const cleanSignals = computeEscalationSignals(
     cleanTicket,
     { issue: "Problem with a company's investigation into an existing problem" },
     { applicable_regulation: "Regulation Z billing dispute", citation: "12 CFR §1026.13" },
-    { confidence: 0.92, requires_human: false }
+    { confidence: 0.92, requires_human: false },
+    HIGH_RISK_ISSUES, HIGH_RISK_CITATION_MARKERS
   );
-  if (cleanSignals.escalate !== false) failures.push(`Negative control: expected escalate=false, got ${cleanSignals.escalate}`);
+  if (cleanSignals.escalate !== false) failures.push(`Negative control: expected escalate=false, got ${cleanSignals.escalate} (signals: ${JSON.stringify(cleanSignals)})`);
+  if (cleanSignals.exceedsMonetaryThreshold !== false) failures.push("Negative control: a $9,000 CRM balance leaked into the monetary-exposure trigger -- spec v7 requires narrative-only");
+
+  // Positive control: a narrative-stated dollar amount over $500 must fire
+  // the monetary-exposure trigger even with an otherwise clean ticket.
+  const monetaryTicket = { complaint_what_happened: "They charged me $750 that I never authorized.", crm: { tenure_years: 2, account_tier: "Standard", product_holdings: ["Checking Account"], outstanding_balance_usd: 0, prior_complaints_12mo: 0 } };
+  const monetarySignals = computeEscalationSignals(
+    monetaryTicket,
+    { issue: "Problem with a company's investigation into an existing problem" },
+    { applicable_regulation: "Regulation Z billing dispute", citation: "12 CFR §1026.13" },
+    { confidence: 0.92, requires_human: false },
+    HIGH_RISK_ISSUES, HIGH_RISK_CITATION_MARKERS
+  );
+  if (monetarySignals.escalate !== true || monetarySignals.exceedsMonetaryThreshold !== true) {
+    failures.push(`Positive control: a $750 narrative amount should trigger escalate via exceedsMonetaryThreshold, got ${JSON.stringify(monetarySignals)}`);
+  }
+
+  // Positive control: a real taxonomy-listed high-risk issue (not just a
+  // citation marker) must independently trigger isHighRiskIssue.
+  const threatSignals = computeEscalationSignals(
+    { complaint_what_happened: "No amount mentioned.", crm: { tenure_years: 1, account_tier: "Standard", product_holdings: [], outstanding_balance_usd: 0, prior_complaints_12mo: 0 } },
+    { issue: "Threatened to arrest you or take you to jail if you do not pay" },
+    { applicable_regulation: "FDCPA", citation: "15 U.S.C. §1692e" },
+    { confidence: 0.95, requires_human: false },
+    HIGH_RISK_ISSUES, HIGH_RISK_CITATION_MARKERS
+  );
+  if (threatSignals.isHighRiskIssue !== true) failures.push("Positive control: a real taxonomy threat/harassment issue did not trigger isHighRiskIssue");
 
   // Non-fixture complaint_id must not silently fabricate a decision.
   if (AGENT1_FIXTURES["24121673"]) failures.push("Unexpected fixture found for a non-fixture complaint_id");
@@ -469,13 +564,14 @@ const jsRegulationIndexTool = `
 const REGULATION_META_INDEX = ${JSON.stringify(REGULATION_META_INDEX, null, 2)};
 const REGULATION_SEARCH_STOPWORDS = new Set(${JSON.stringify([...REGULATION_SEARCH_STOPWORDS])});
 const REGULATION_SEARCH_SYNONYMS = ${JSON.stringify(REGULATION_SEARCH_SYNONYMS)};
+const REGULATION_SEARCH_PHRASE_SYNONYMS = ${JSON.stringify(REGULATION_SEARCH_PHRASE_SYNONYMS, null, 2)};
 
 ${regulationIndexLookup.toString()}
 
 const ticket = $input.item.json;
 const category = (ticket.agent1_output && (ticket.agent1_output.primary_issue || ticket.agent1_output.issue)) || ticket.issue;
 const queryText = \`\${ticket.issue} \${category} \${ticket.complaint_what_happened || ""}\`;
-const result = regulationIndexLookup(REGULATION_META_INDEX, REGULATION_SEARCH_STOPWORDS, REGULATION_SEARCH_SYNONYMS, queryText);
+const result = regulationIndexLookup(REGULATION_META_INDEX, REGULATION_SEARCH_STOPWORDS, REGULATION_SEARCH_SYNONYMS, REGULATION_SEARCH_PHRASE_SYNONYMS, queryText);
 return { json: { ...ticket, agent2_regulation_tool_result: result } };
 `.trim();
 
@@ -566,24 +662,29 @@ return { json: { ...ticket, agent4_tool_result: { clause_reverified, crm_fact_re
 `.trim();
 
 const jsComputeEscalationSignals = `
-// Deterministic escalation-signal computation (spec Section 7). This is NOT
-// a fifth agent call -- it's a plain rules evaluation over the four agents'
-// already-produced structured outputs plus the CRM record, feeding a single
-// boolean into the IF node that follows. Two interpretation calls made here,
-// both worth confirming against intent (see README):
-//   1. "Stated monetary exposure" is read as crm.outstanding_balance_usd --
-//      the only concrete dollar figure available in the structured record,
-//      rather than parsing free-text narrative for a dollar amount.
-//   2. "High-risk issue type" is detected via keyword match against Agent 1's
-//      classified issue text and Agent 2's regulation citation (including a
-//      direct check for the FCRA §1681c-2 citation itself as a marker),
-//      not a fresh narrative re-read -- keeps this step deterministic.
-const HIGH_RISK_KEYWORDS = ${JSON.stringify(HIGH_RISK_KEYWORDS)};
+// Deterministic escalation-signal computation (spec Section 7, resolved v7).
+// This is NOT a fifth agent call -- it's a plain rules evaluation over the
+// four agents' already-produced structured outputs plus the CRM record,
+// feeding a single boolean into the IF node that follows.
+//   1. Monetary exposure is read from the NARRATIVE only (best-effort dollar
+//      extraction), never crm.outstanding_balance_usd -- balance already has
+//      its own independent trigger via isHighValueAccount, so reusing it
+//      here would double-count the same number under two different labels.
+//   2. High-risk issue type is matched against Agent 1's classified
+//      issue/sub_issue value against an explicit list drawn from the real
+//      cached taxonomy, and/or a citation-based marker (FCRA §1681c-2) --
+//      never the raw narrative text, which would repeat Ticket C's original
+//      failure mode of pattern-matching on surface wording instead of
+//      trusting the structured classification.
+const HIGH_RISK_ISSUES = new Set(${JSON.stringify([...HIGH_RISK_ISSUES])});
+const HIGH_RISK_CITATION_MARKERS = ${JSON.stringify(HIGH_RISK_CITATION_MARKERS)};
+
+${extractNarrativeMonetaryExposure.toString()}
 
 ${computeEscalationSignals.toString()}
 
 const ticket = $input.item.json;
-const signals = computeEscalationSignals(ticket, ticket.agent1_output, ticket.agent2_output, ticket.agent4_output);
+const signals = computeEscalationSignals(ticket, ticket.agent1_output, ticket.agent2_output, ticket.agent4_output, HIGH_RISK_ISSUES, HIGH_RISK_CITATION_MARKERS);
 return { json: { ...ticket, escalation_signals: signals, escalate: signals.escalate } };
 `.trim();
 
