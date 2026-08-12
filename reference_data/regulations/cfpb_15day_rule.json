@@ -1,0 +1,12 @@
+{
+  "_meta": {
+    "regulation": "CFPB complaint rule",
+    "citation": "Dodd-Frank Act company-response standard",
+    "topic": "Company response deadline",
+    "source_url": "https://www.consumerfinance.gov/compliance/consumer-complaint-program/company-process/",
+    "retrieved_date": "2026-08-12",
+    "pilot_relevance": "Applies to every complaint in the pilot -- backs the SLA compliance metric (spec Section 9).",
+    "sourcing_note": "CFPB's own published complaint-handling standard, quoted from its official process page. Cached once at build time per spec Section 3b."
+  },
+  "text": "The Dodd-Frank Wall Street Reform and Consumer Protection Act requires the CFPB to collect, investigate, and respond to consumer complaints about financial products and services. Once the CFPB sends a complaint to a company, the company reviews the information, communicates with the consumer as needed, and determines what action to take in response.\n\nCompany responds: your company provides a response within 15 calendar days.\n\nIf your response is not final, let us know. Your company will then have up to 60 calendar days to provide a final response.\n\nComplaints are typically published on the Consumer Complaint Database after the company responds, or after 15 days, whichever comes first, and the consumer is given the opportunity to review the company's response."
+}

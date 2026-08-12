@@ -1,0 +1,168 @@
+{
+  "name": "Complaint Triage Orchestrator (S2.3)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "a1e6c2f0-1a2b-4c3d-8e4f-000000000001",
+      "name": "Schedule Trigger (15 min)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -400,
+        -100
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a1e6c2f0-1a2b-4c3d-8e4f-000000000002",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Watermark-based fetch (spec Section 5) -- read the last date_received we\n// successfully advanced past, or fall back to an initial lookback window on\n// the very first run.\n//\n// Why a lookback window and not \"since yesterday\": the CFPB Consumer Complaint\n// Database only publishes a complaint once the company has responded or 15\n// calendar days have passed (spec Section 3b, the CFPB 15-day rule). A poll\n// watermarked to \"yesterday\" would mostly return nothing. INITIAL_LOOKBACK_DAYS\n// gives the first run a realistic chance of hits while still behaving like a\n// genuine incremental poller from the second run onward.\nconst INITIAL_LOOKBACK_DAYS = 30;\n\nconst staticData = $getWorkflowStaticData('node');\n\nlet watermarkDate = staticData.lastWatermarkDate;\nlet isFirstRun = false;\n\nif (!watermarkDate) {\n  isFirstRun = true;\n  const fallback = new Date();\n  fallback.setUTCDate(fallback.getUTCDate() - INITIAL_LOOKBACK_DAYS);\n  watermarkDate = fallback.toISOString().slice(0, 10); // YYYY-MM-DD\n}\n\nreturn [\n  {\n    json: {\n      watermarkDate,\n      isFirstRun,\n    },\n  },\n];\n"
+      },
+      "id": "a1e6c2f0-1a2b-4c3d-8e4f-000000000003",
+      "name": "Get Watermark",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "product",
+              "value": "Debt collection"
+            },
+            {
+              "name": "product",
+              "value": "Credit card"
+            },
+            {
+              "name": "date_received_min",
+              "value": "={{ $json.watermarkDate }}"
+            },
+            {
+              "name": "size",
+              "value": "25"
+            },
+            {
+              "name": "sort",
+              "value": "created_date_asc"
+            },
+            {
+              "name": "no_aggs",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1e6c2f0-1a2b-4c3d-8e4f-000000000004",
+      "name": "CFPB Complaint Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        60,
+        0
+      ],
+      "notesInFlow": true,
+      "notes": "Pilot scope (spec Section 4): Debt collection + Credit card only. product= repeated as two query params is a real, verified OR filter against the live API (confirmed by build-time testing, not assumed from docs). date_received_min accepts YYYY-MM-DD only -- the live API rejects sub-day timestamps, confirmed by testing during Phase 1 build."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Cap to 25/run (spec Section 5 -- cost predictability, not a rate-limit\n// necessity; size=25 is already set on the request, this is a defensive\n// second cap), flatten each ES hit down to the fields the rest of the\n// pipeline needs (spec Section 3a), and advance the watermark to the latest\n// date_received actually seen in this batch.\n//\n// Watermark precision note: CFPB's date_received_min filter is date-level\n// (YYYY-MM-DD), not timestamp-level -- confirmed live during Phase 1 build\n// (a sub-day timestamp is rejected by the API). That means a same-day poll\n// can re-return complaints already fetched earlier that day. This workflow\n// does not dedup here by design -- spec Section 11 assigns dedup to the\n// storage layer (\"Google Sheets Append-or-Update, dedup via complaint ID\"),\n// wired in a later phase. Downstream nodes must not assume every item here\n// is new.\nconst MAX_PER_RUN = 25;\n\nconst response = $input.first().json;\nconst hits = (response.hits && response.hits.hits) || [];\nconst capped = hits.slice(0, MAX_PER_RUN);\n\nconst staticData = $getWorkflowStaticData('node');\nlet maxDate = staticData.lastWatermarkDate || null;\n\nconst out = capped.map((hit) => {\n  const src = hit._source;\n  const received = (src.date_received || '').slice(0, 10);\n  if (received && (!maxDate || received > maxDate)) {\n    maxDate = received;\n  }\n  return {\n    json: {\n      complaint_id: src.complaint_id,\n      product: src.product,\n      sub_product: src.sub_product,\n      issue: src.issue,\n      sub_issue: src.sub_issue,\n      company: src.company,\n      state: src.state,\n      tags: src.tags,\n      date_received: src.date_received,\n      timely: src.timely,\n      company_response: src.company_response,\n      complaint_what_happened: src.complaint_what_happened,\n    },\n  };\n});\n\nif (maxDate) {\n  staticData.lastWatermarkDate = maxDate;\n}\n\nreturn out;\n"
+      },
+      "id": "a1e6c2f0-1a2b-4c3d-8e4f-000000000005",
+      "name": "Cap Batch & Advance Watermark",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        0
+      ],
+      "notesInFlow": true,
+      "notes": "Phase 1 stops here: capped, flattened batch of new-since-watermark tickets. Phase 2 (synthetic CRM generator), the four agents, escalation gate, and storage/dedup are not yet wired."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (15 min)": {
+      "main": [
+        [
+          {
+            "node": "Get Watermark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Watermark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Watermark": {
+      "main": [
+        [
+          {
+            "node": "CFPB Complaint Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CFPB Complaint Search": {
+      "main": [
+        [
+          {
+            "node": "Cap Batch & Advance Watermark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
