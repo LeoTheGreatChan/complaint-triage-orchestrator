@@ -44,3 +44,14 @@ Each file's `text` field is the verbatim public-domain statutory/regulatory text
 LII for the four US Code/CFR sections; CFPB's own process page for the 15-day rule), with
 a `_meta` block carrying citation, topic, source URL, retrieval date, and pilot relevance.
 This is a technical demonstration, not legal advice (spec Section 14, disclosure 4).
+
+**Source substitution, undocumented until now:** spec Section 3b's table names
+`ecfr.gov/current/title-12/.../section-1026.13` as Regulation Z's source. During Phase 1
+sourcing, eCFR's direct URL redirected to a bot-detection page (`unblock.federalregister.gov`)
+and refused automated access. `reg_z_1026_13.json` was sourced from Cornell LII's CFR
+mirror (`law.cornell.edu/cfr/text/12/1026.13`) instead — the same authoritative federal
+regulatory text, republished by the same institution already used for the four US Code
+sections, just not the exact URL Section 3b names. Caught during a v8 verification pass
+of every field claim in Section 3a/3b; the text itself was already independently
+verified in Phase 1 (fetched and cross-checked against the real statute), only the
+documented-source label had drifted from what was actually used.
