@@ -71,11 +71,17 @@ snapshot (complaint IDs in the 9999970s) that a live poll today won't encounter 
 IDs. Same schema either way, so the fixtures stay a drop-in match for what production
 data will actually look like once the mock-to-real swap happens (Section 15 Phase 7).
 
-`special_population_flag` also folds in the Servicemember tag, not just Older American
-— the spec's field description ("Same hybrid rule (Servicemember / Older American
-tags)") reads as the broader of the two flags, and CFPB's own supervisory language
-treats servicemembers and older Americans together as populations warranting
-extra-care handling. Worth confirming that reading is what you intended.
+`special_population_flag` folds in the Servicemember tag, not just Older American —
+confirmed as intended in spec v5, which also formalizes the consequence: Agent 2's CRM
+lookup tool (Phase 3, not yet built) must always populate `special_population_flag` on
+every ticket regardless of whether the broader CRM-context lookup (tenure, balance,
+prior-complaint history) runs. Nothing changes here in Phase 2 — this generator already
+computes the flag unconditionally on every synthetic CRM record, independent of any
+downstream agent's decision to use the rest of the record. What v5 adds is a Phase 3
+requirement: Agent 2's tool interface and output schema need to expose the flag on its
+own (`special_population_flag: bool`, not folded into free-text `customer_context`),
+separately from the discretionary broader lookup — see spec Section 6's structured
+hand-off schema and the twelve updated fixtures.
 
 ### A build-time finding worth flagging before Phase 2
 
