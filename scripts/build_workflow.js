@@ -102,9 +102,120 @@ const FIXTURE_TICKETS = [
       preferred_channel: "Web", servicemember_flag: false, special_population_flag: false,
     },
   },
+  // Tickets D-H: five real CFPB tickets pulled live from the same 25-ticket
+  // batch dashboard/data/pipeline_log.json's `awaiting_records` already held
+  // (spec Section 5, capped batch, product in [Debt collection, Credit
+  // card], date_received >= 2026-07-14). Hand-verified the same way A/B/C
+  // were: real taxonomy tool lookup, real regulation-index search against
+  // this build's five cached regulations, real deterministic synthetic CRM
+  // (same mulberry32 generator Phase 2 already ran on them). Narrative text
+  // is copied verbatim from the live CFPB API response (including its own
+  // "XX/XX" redaction placeholders) for the four tickets that had a public
+  // narrative; Ticket H had none (CFPB's own has_narrative=false) and is
+  // deliberately kept that way rather than inventing one.
+  {
+    complaint_id: "24158082",
+    product: "Debt collection",
+    sub_product: "Other debt",
+    issue: "Written notification about debt",
+    sub_issue: "Didn't receive notice of right to dispute",
+    company: "American Profit Recovery, Inc., Marlborough, MA Branch",
+    state: "TX",
+    tags: null,
+    date_received: "2026-07-14T00:13:58.000Z",
+    timely: "Yes",
+    company_response: "Closed with explanation",
+    complaint_what_happened: "Debt Collection Complaint I am disputing this alleged debt because I do not believe I owe the amount being claimed. I enrolled in a payment plan for my XXXX XXXX (formerly referred to as XXXX or XXXX XXXX XXXX) equipment and made my required monthly payments. My understanding was that the agreement would end after approximately 12 months. When my payment term was complete, a technician came to retrieve the handheld equipment. Before surrendering the equipment, I specifically asked whether my account was paid in full. Although the technician mentioned he was new and could not verify every detail in the system, he proceeded to collect the equipment and provided me with a printed receipt showing a balance of $0.00. To my understanding, the company would not have been able to retrieve the equipment or close out that portion of my account if there had been an outstanding balance. Based on the receipt showing a XXXX balance and the fact that the equipment was accepted and removed from my possession, I reasonably believed my account was fully satisfied. Now, after a significant amount of time has passed, I have learned that a collection account for approximately $550.00 has been reported or is being collected. I was never made aware of this alleged balance because any notices were apparently sent to an address where I have not lived for over three years. As a result, I had no opportunity to address or dispute the alleged debt before it was sent to collections. I respectfully request that this account be investigated. If the creditor claims I owe this balance, I request complete validation of the debt, including: a detailed accounting showing how the alleged balance of approximately $550.00 was calculated, copies of any agreement or contract demonstrating that I remained responsible for this balance, records of all payments made on the account, and documentation explaining why I was issued a receipt showing a $0.00 balance when the equipment was collected. Because I possess documentation showing a XXXX balance at the time the equipment was returned, I dispute the accuracy of this debt and request that the collection activity and any credit reporting be corrected if the debt cannot be properly validated.",
+    crm: {
+      account_id: "SYN-1S8MVB7", linked_complaint_id: "24158082", customer_since: "2016-09-11",
+      tenure_years: 10, account_tier: "Standard", product_holdings: ["Certificate of Deposit", "Auto Loan", "Home Equity Line of Credit", "Credit Card"],
+      outstanding_balance_usd: 0, prior_complaints_12mo: 3, prior_contacts_90d: 1,
+      preferred_channel: "Web", servicemember_flag: false, special_population_flag: false,
+    },
+  },
+  {
+    complaint_id: "24157871",
+    product: "Debt collection",
+    sub_product: "I do not know",
+    issue: "Communication tactics",
+    sub_issue: "Frequent or repeated calls",
+    company: "Collections Acquisition Company, Inc.",
+    state: "PA",
+    tags: null,
+    date_received: "2026-07-14T00:17:07.000Z",
+    timely: "Yes",
+    company_response: "Closed with explanation",
+    complaint_what_happened: "Called me 9 times and left 8 voicemails within 7 minutes. On the 9th straight call I picked up and told them I work nights and am trying to sleep and to not call me again and they hung up. After researching the number they called from I discovered it is for a debt that I have already paid.",
+    crm: {
+      account_id: "SYN-17YTGVQ", linked_complaint_id: "24157871", customer_since: "2023-10-06",
+      tenure_years: 3, account_tier: "Standard", product_holdings: ["Certificate of Deposit", "Personal Loan"],
+      outstanding_balance_usd: 0, prior_complaints_12mo: 1, prior_contacts_90d: 0,
+      preferred_channel: "Web", servicemember_flag: false, special_population_flag: false,
+    },
+  },
+  {
+    complaint_id: "24157473",
+    product: "Credit card",
+    sub_product: "General-purpose credit card or charge card",
+    issue: "Fees or interest",
+    sub_issue: "Problem with fees",
+    company: "U.S. BANCORP",
+    state: "MA",
+    tags: null,
+    date_received: "2026-07-14T00:02:31.000Z",
+    timely: "Yes",
+    company_response: "Closed with explanation",
+    complaint_what_happened: "On XX/XX/year>, I closed my US Bank XXXX XXXX XXXX XXXX, which has a $400.00 annual fee. As a Massachusetts resident, I requested a pro-rated annual fee refund afforded to me by Massachusetts General Laws Chapter 140, Section 114C. I received a letter (image attached) dated XX/XX/XXXX, stating that they would not be refunding this fee. U.S. Bank is violating Massachusetts General Laws Chapter 140, Section 114C by denying a legally mandated two-thirds prorated annual fee refund upon account closure.",
+    crm: {
+      account_id: "SYN-HQZST8", linked_complaint_id: "24157473", customer_since: "2023-06-20",
+      tenure_years: 3, account_tier: "Preferred", product_holdings: ["Personal Loan", "Home Equity Line of Credit"],
+      outstanding_balance_usd: 4545.59, prior_complaints_12mo: 0, prior_contacts_90d: 1,
+      preferred_channel: "Web", servicemember_flag: false, special_population_flag: false,
+    },
+  },
+  {
+    complaint_id: "24157200",
+    product: "Credit card",
+    sub_product: "General-purpose credit card or charge card",
+    issue: "Trouble using your card",
+    sub_issue: "Credit card company won't increase or decrease your credit limit",
+    company: "WELLS FARGO & COMPANY",
+    state: "NJ",
+    tags: null,
+    date_received: "2026-07-14T00:03:45.000Z",
+    timely: "Yes",
+    company_response: "Closed with explanation",
+    complaint_what_happened: "On XX/XX/year>, Wells Fargo denied my request for a credit limit increase on my credit card account ending XXXX, citing a single reason: unacceptable past credit history. The denial letter contains none of the disclosures required by FCRA (XXXX)(XXXX XXXX. XXXX (XXXX)) when adverse action is based in whole or in part on a consumer report: it does not identify any consumer reporting agency, does not provide the agency's contact information, does not disclose the credit score used or its range and key factors, and does not state my right to obtain a free copy of the report or to dispute its contents.",
+    crm: {
+      account_id: "SYN-FBM1I0", linked_complaint_id: "24157200", customer_since: "2021-04-06",
+      tenure_years: 5, account_tier: "Standard", product_holdings: ["Auto Loan"],
+      outstanding_balance_usd: 0, prior_complaints_12mo: 2, prior_contacts_90d: 2,
+      preferred_channel: "Phone", servicemember_flag: false, special_population_flag: false,
+    },
+  },
+  {
+    complaint_id: "24157609",
+    product: "Debt collection",
+    sub_product: "I do not know",
+    issue: "Attempts to collect debt not owed",
+    sub_issue: "Debt was result of identity theft",
+    company: "CL Holdings LLC",
+    state: "TX",
+    tags: "Servicemember",
+    date_received: "2026-07-14T00:11:22.000Z",
+    timely: "Yes",
+    company_response: "Closed with non-monetary relief",
+    complaint_what_happened: "",
+    crm: {
+      account_id: "SYN-TTYX3Z", linked_complaint_id: "24157609", customer_since: "2016-03-10",
+      tenure_years: 10, account_tier: "Standard", product_holdings: ["Credit Card", "Home Equity Line of Credit"],
+      outstanding_balance_usd: 0, prior_complaints_12mo: 0, prior_contacts_90d: 0,
+      preferred_channel: "Web", servicemember_flag: true, special_population_flag: true,
+    },
+  },
 ];
 
-const FIXTURE_IDS = ["9999970", "9999975", "9999983"];
+const FIXTURE_IDS = ["9999970", "9999975", "9999983", "24158082", "24157871", "24157473", "24157200", "24157609"];
 
 const AGENT1_FIXTURES = {
   "9999970": { tool_used: false, output: { issue: "Written notification about debt", severity: "High", confidence: 0.88 } },
@@ -119,6 +230,33 @@ const AGENT1_FIXTURES = {
       primary_issue: "Card opened without my consent or knowledge",
     },
   },
+  // D: consumer holds a $0-balance receipt directly contradicting a later
+  // $550 collection claim; notices sent to a 3-years-stale address. Real
+  // taxonomy tool confirms the sub-issue; real regulation-index search
+  // matches "validation" straight out of the consumer's own narrative text.
+  "24158082": { tool_used: true, output: { issue: "Written notification about debt", severity: "High", confidence: 0.83 } },
+  // E: real regulation-index search over issue+narrative finds no match --
+  // FDCPA §1692d (harassment/repeated-contact) isn't in this build's five
+  // cached regulations. Severity still High: 9 calls/8 voicemails in 7
+  // minutes plus a "debt I've already paid" claim is substantive regardless
+  // of citation availability.
+  "24157871": { tool_used: false, output: { issue: "Communication tactics", severity: "High", confidence: 0.8 } },
+  // F: consumer's claim rests on Massachusetts General Laws c. 140 §114C, a
+  // state statute -- outside this build's five federal regulations by
+  // design (spec Section 4). First non-"High" severity in the fixture set:
+  // a well-defined, quantifiable fee dispute, not identity theft or fraud.
+  "24157473": { tool_used: false, output: { issue: "Fees or interest", severity: "Medium", confidence: 0.72 } },
+  // G: consumer itemizes specific FCRA adverse-action disclosures the denial
+  // letter is missing -- a real, checkable procedural claim, but FCRA's
+  // adverse-action notice requirement (15 U.S.C. §1681m) isn't in this
+  // build's cached corpus (only §1681c-2's identity-theft block is).
+  "24157200": { tool_used: false, output: { issue: "Trouble using your card", severity: "Medium", confidence: 0.7 } },
+  // H: no consumer narrative exists (CFPB has_narrative=false) -- Agent 1
+  // leans on the real taxonomy tool since there's no text to reason from.
+  // Confidence capped noticeably below B/C's identity-theft tickets (0.81/
+  // 0.78) specifically because there's nothing beyond the filed category to
+  // substantiate it.
+  "24157609": { tool_used: true, output: { issue: "Attempts to collect debt not owed", severity: "High", confidence: 0.6 } },
 };
 
 const AGENT2_FIXTURES = {
@@ -138,18 +276,70 @@ const AGENT2_FIXTURES = {
       precedent_notes: "Filed category plus 'fraudulent case application' language point to the account-opening issue as substantive; the dropped call compounds it, doesn't replace it",
     },
   },
+  "24158082": {
+    broader_crm_lookup_used: true,
+    output: {
+      applicable_regulation: "FDCPA §809(b)", citation: "15 U.S.C. §1692g(b)",
+      precedent_notes: "Real regulation-index search matched 'validation' directly out of the consumer's own narrative text against the cached FDCPA §1692g entry. CRM shows 3 prior complaints in the past 12 months — an independent repeat-complainant signal separate from this ticket's own substance.",
+    },
+  },
+  "24157871": {
+    broader_crm_lookup_used: true,
+    output: {
+      applicable_regulation: null, citation: null,
+      precedent_notes: "Real regulation-index search (issue + narrative, no matching terms) returned zero matches -- FDCPA §1692d (harassment/abuse) isn't in this build's cached corpus (only §1692g and §1692e are). Escalation instead rests on the contact-frequency pattern itself and the consumer's already-paid claim, not a citation.",
+    },
+  },
+  "24157473": {
+    broader_crm_lookup_used: true,
+    output: {
+      applicable_regulation: null, citation: null,
+      precedent_notes: "Real regulation-index search returned zero matches -- the consumer's claim rests on Massachusetts General Laws c. 140 §114C, a state statute this build's five-regulation federal corpus was never scoped to cover (spec Section 4).",
+    },
+  },
+  "24157200": {
+    broader_crm_lookup_used: true,
+    output: {
+      applicable_regulation: null, citation: null,
+      precedent_notes: "Real regulation-index search returned zero matches -- FCRA's adverse-action disclosure requirement (15 U.S.C. §1681m) isn't in this build's cached corpus (only §1681c-2's identity-theft block procedure is). CRM shows 2 prior complaints in the past 12 months, an independent repeat-complainant signal regardless.",
+    },
+  },
+  "24157609": {
+    broader_crm_lookup_used: true,
+    output: {
+      applicable_regulation: null, citation: null,
+      precedent_notes: "Real regulation-index search (issue + narrative only -- there is no narrative for this ticket) returned zero matches. CFPB's own filed sub-issue is 'Debt was result of identity theft', a real and serious label, but this build's regulation-search tool deliberately doesn't see sub-issue text (the same reasoning as the Ticket C taxonomy-sibling finding: trust the structured classification pipeline, not surface wording), so no citation is available to hand to Agent 3.",
+    },
+  },
 };
 
 const AGENT3_FIXTURES = {
   "9999970": { tool_used: true, output: { draft: "Cites §1692g(b), commits to resending itemised validation documentation, pauses collection activity", cites_regulation: true }, cited_clause: "15 U.S.C. §1692g(b)" },
   "9999975": { tool_used: true, output: { draft: "Provides FTC identity-theft report/police report instructions per §605B, confirms collection paused", cites_regulation: true }, cited_clause: "15 U.S.C. §1681c-2" },
   "9999983": { tool_used: true, output: { draft: "Apologises for the dropped call and commits to a 24hr callback; separately and primarily, treats the account-opening concern as a potential unauthorised-account matter, provides FCRA §605B block-request instructions, confirms no charges apply pending investigation", cites_regulation: true }, cited_clause: "15 U.S.C. §1681c-2" },
+  "24158082": { tool_used: true, output: { draft: "Cites §1692g(b), pauses collection activity pending validation, requests the company produce a full accounting and proof of the outstanding balance given the consumer's $0-balance receipt and the stale mailing address", cites_regulation: true }, cited_clause: "15 U.S.C. §1692g(b)" },
+  // No citation available (Agent 2 found none) -- drafts and escalates on the
+  // pattern itself instead. First fixture to exercise "drafts without citing
+  // a regulation," a branch structurally present since Phase 3 but never
+  // taken until this batch (see README's "untested branches" note).
+  "24157871": { tool_used: false, output: { draft: "Acknowledges the excessive-contact pattern (9 calls, 8 voicemails in 7 minutes) and the consumer's claim the debt was already paid; commits to pausing outbound contact pending an internal payment-history review", cites_regulation: false } },
+  "24157473": { tool_used: false, output: { draft: "Acknowledges the consumer's cited Massachusetts General Laws c. 140 §114C pro-rated fee-refund claim and the $400 annual fee at issue; recommends routing to a state-compliance specialist since no federal regulation in the cached index applies", cites_regulation: false } },
+  "24157200": { tool_used: false, output: { draft: "Acknowledges the consumer's itemised list of missing FCRA adverse-action disclosures and commits to an internal compliance review of the credit-limit denial letter template", cites_regulation: false } },
+  "24157609": { tool_used: false, output: { draft: "Acknowledges the account is disputed as resulting from identity theft per the consumer's own filed CFPB category, and requests supporting documentation (a police report or FTC identity-theft report) before proceeding", cites_regulation: false } },
 };
 
 const AGENT4_FIXTURES = {
   "9999970": { tool_used: true, output: { confidence: 0.55, requires_human: true, reason: "Servicemember + attorney/FTC mention + disputed dates in collector's own response" }, reverify_clause: "15 U.S.C. §1692g(b)", reverify_crm_field: "tenure_years" },
   "9999975": { tool_used: true, output: { confidence: 0.4, requires_human: true, reason: "Identity-theft indicator — flagged high-risk regardless of draft quality" }, reverify_clause: "15 U.S.C. §1681c-2", reverify_crm_field: "prior_complaints_12mo" },
   "9999983": { tool_used: true, output: { confidence: 0.5, requires_human: true, reason: "Primary issue is identity-theft-adjacent — high-risk category requires human review regardless of how straightforward the secondary service issue is" }, reverify_clause: "15 U.S.C. §1681c-2", reverify_crm_field: "prior_complaints_12mo" },
+  "24158082": { tool_used: true, output: { confidence: 0.58, requires_human: true, reason: "Consumer holds documentary evidence ($0-balance receipt) directly contradicting the claimed $550 balance, and CRM shows 3 prior complaints in 12 months -- a real evidentiary conflict plus a repeat-complainant pattern" }, reverify_clause: "15 U.S.C. §1692g(b)", reverify_crm_field: "prior_complaints_12mo" },
+  // No clause was cited, so there's nothing to reverify -- tool_used: false.
+  // First fixture to exercise "scores without verifying a claim," the
+  // matching Agent 4 branch never taken until this batch.
+  "24157871": { tool_used: false, output: { confidence: 0.45, requires_human: true, reason: "No regulation match to verify; an excessive-contact pattern (9 calls/8 voicemails in 7 minutes) plus a disputed 'already paid' claim leaves high uncertainty without a citable rule to anchor the QA check" } },
+  "24157473": { tool_used: false, output: { confidence: 0.5, requires_human: true, reason: "Claim rests on a state statute outside the cached regulation corpus -- nothing to verify against this build's reference data, and state-law compliance questions warrant human review regardless" } },
+  "24157200": { tool_used: false, output: { confidence: 0.48, requires_human: true, reason: "Consumer's claim cites a specific FCRA disclosure requirement this build's regulation corpus doesn't cover, and CRM shows 2 prior complaints in 12 months -- both independently warrant human review" } },
+  "24157609": { tool_used: false, output: { confidence: 0.42, requires_human: true, reason: "CFPB's own filed sub-issue is 'Debt was result of identity theft' -- a serious, real government classification -- but there is no consumer narrative to substantiate it and Agent 2's regulation-search tool found no supporting citation; flagging for human review because the filed category and the available evidence are mismatched, not because either signal alone is routine" } },
 };
 
 // ===========================================================================
@@ -347,7 +537,15 @@ function computeEscalationSignals(ticket, agent1Output, agent2Output, agent4Outp
 // Anything else ("Closed with explanation" + timely) reads as "routine."
 function computeGroundTruthAgreement(ticket, escalate) {
   const isTimely = ticket.timely === "Yes";
-  const gotMonetaryRelief = /monetary relief/i.test(ticket.company_response || "");
+  // Negative lookbehind, not a plain /monetary relief/i test: CFPB's real
+  // company_response schema has a DISTINCT "Closed with non-monetary relief"
+  // category, which contains the substring "monetary relief" and would
+  // otherwise be misread as the company having paid the consumer something.
+  // Found via a real ticket (24157609, CL Holdings LLC) the first time this
+  // build processed a live batch that happened to include that response
+  // value -- the three original Section 6 fixtures all share "Closed with
+  // explanation" and never exercised this branch.
+  const gotMonetaryRelief = /(?<!non-)monetary relief/i.test(ticket.company_response || "");
   const groundTruthSignal = (!isTimely || gotMonetaryRelief) ? "elevated" : "routine";
   const agreesWithGroundTruth = (escalate && groundTruthSignal === "elevated") || (!escalate && groundTruthSignal === "routine");
 
@@ -542,6 +740,13 @@ function selfTest() {
   // Positive control: monetary relief should read as "elevated" too.
   const monetaryReliefSignals = computeGroundTruthAgreement({ timely: "Yes", company_response: "Closed with monetary relief" }, true);
   if (monetaryReliefSignals.ground_truth_signal !== "elevated") failures.push(`Positive control: "Closed with monetary relief" should read "elevated", got ${JSON.stringify(monetaryReliefSignals)}`);
+
+  // Negative control: "Closed with non-monetary relief" is a real, distinct
+  // CFPB response category and must NOT be misread as monetary relief just
+  // because it contains that substring (see the comment on
+  // computeGroundTruthAgreement -- found via real ticket 24157609).
+  const nonMonetaryReliefSignals = computeGroundTruthAgreement({ timely: "Yes", company_response: "Closed with non-monetary relief" }, true);
+  if (nonMonetaryReliefSignals.ground_truth_signal !== "routine") failures.push(`Negative control: "Closed with non-monetary relief" should read "routine" (timely + not actually monetary relief), got ${JSON.stringify(nonMonetaryReliefSignals)}`);
 
   // Positive control: a routine outcome auto-resolved should agree.
   const routineAutoResolveSignals = computeGroundTruthAgreement({ timely: "Yes", company_response: "Closed with explanation" }, false);

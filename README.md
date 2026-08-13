@@ -302,35 +302,48 @@ implemented:
   reasoning quality — noted here for whichever phase builds that metric, since Phase 3
   doesn't reach the dashboard.
 
-### Untested branches — consolidated into one Phase 7 checklist, with cause traced (v6)
+### Untested branches — two of three closed with real tickets, not invented ones (v12)
 
-Three branches share one root cause, now stated as a single checklist rather than
-three separate notes: **the Ticket C compound-issue fix (spec Section 6) is what
-removed the fixtures' only examples of Agent 3 and Agent 4 skipping their tools** — the
-original, incorrect version of Ticket C didn't cite a regulation; correcting it gave
-Ticket C a citation too, which is correct for Ticket C's classification but had the
-side effect of eliminating the only fixture that exercised those two `false` branches.
-Confirm all three against a real ticket at Phase 7, not just against A/B/C:
+Originally three branches shared one root cause: **the Ticket C compound-issue fix
+(spec Section 6) is what removed the fixtures' only examples of Agent 3 and Agent 4
+skipping their tools** — the original, incorrect version of Ticket C didn't cite a
+regulation; correcting it gave Ticket C a citation too, which is correct for Ticket C's
+classification but had the side effect of eliminating the only fixture that exercised
+those two `false` branches.
 
+Two of the three are now genuinely closed. Five real CFPB tickets pulled from a live
+batch (Tickets D-H, see Phase 6's "Pull a real batch of live tickets" below) were
+hand-verified fixtures the same way A/B/C were — real taxonomy tool, real
+regulation-index search — and four of the five genuinely got no regulation match back
+from the real tool (FDCPA §1692d harassment, FCRA §1681m adverse-action, and a state
+statute all fall outside this build's five cached regulations):
+
+- ~~Agent 3 drafting without citing a regulation.~~ **Closed** — Tickets E/F/G/H all
+  draft without a citation, because the real regulation-search tool genuinely found
+  none for them.
+- ~~Agent 4 scoring without verifying a claim.~~ **Closed** — same four tickets; with
+  no clause to reverify, Agent 4's tool goes unused.
 - Agent 2's broader CRM-context lookup being skipped (only the always-on
-  `special_population_flag` check is guaranteed across all three fixtures).
-- Agent 3 drafting without citing a regulation.
-- Agent 4 scoring without verifying a claim.
+  `special_population_flag` check is guaranteed) — **still open**. All 8 fixtures use
+  it. Confirm at Phase 7, not invented for its own sake.
 
-All three are structurally present and correctly wired in the workflow (`IF: Agent 2/3/4
-Tool Used?`'s `false` output each routes correctly) — they're just never taken by the
+The still-open branch is structurally present and correctly wired in the workflow
+(`IF: Agent 2 Tool Used?`'s `false` output routes correctly) — just never taken by the
 current fixture set.
 
 ### How to run
 
 1. Import [`n8n/workflows/complaint_triage_orchestrator.json`](n8n/workflows/complaint_triage_orchestrator.json)
    into n8n (Workflows → Import from File) — no credentials needed.
-2. Run **Fixture Test Trigger (A/B/C)** manually. All three items should reach `Final:
-   Escalate to Human Queue`.
-3. Running **Manual Trigger** (the live path) will currently route everything to `Live
-   Ticket (Awaiting Phase 7)` unless a fetched complaint_id happens to be one of the
-   three fixtures (it won't be — those are a historical snapshot). To pull and inspect a
-   real batch this way without opening n8n, see "Pull a real batch of live tickets"
+2. Run **Fixture Test Trigger (A/B/C)** manually. All eight items should reach `Final:
+   Escalate to Human Queue`. (The node's name is a holdover from when it only carried
+   three; it now carries all eight fixture tickets — see "Untested branches" above.)
+3. Running **Manual Trigger** (the live path) will route anything to `Live Ticket
+   (Awaiting Phase 7)` unless a fetched complaint_id happens to be one of the eight
+   fixtures — three are a fixed historical snapshot, but five (D-H) were pulled from a
+   real live batch and can genuinely reappear on a fresh fetch, in which case they'll
+   now correctly route to a real decision instead of the dead end. To pull and inspect
+   a real batch this way without opening n8n, see "Pull a real batch of live tickets"
    under Phase 6 below — it drives this exact path through the simulator.
 
 ## Phase 5 — ground-truth comparison
@@ -365,7 +378,12 @@ that this must be reported as "X% agreement," never accuracy:
 - **`timely === "No"`** → the company missed CFPB's own 15-day response standard — a
   real signal the case likely needed more than routine handling.
 - **`company_response` mentions "monetary relief"** → CFPB confirms the company paid
-  the consumer something — a real signal the complaint had substance.
+  the consumer something — a real signal the complaint had substance. Checked with a
+  negative lookbehind, not a plain substring test — CFPB's real schema has a distinct
+  `"Closed with non-monetary relief"` category that contains the substring "monetary
+  relief" and would otherwise misread as the opposite of what it means. Found via a
+  real ticket (24157609) the first time a live batch happened to include that response
+  value; the original three fixtures never exercised it.
 - Anything else (`"Closed with explanation"` + timely) reads as **`"routine"`**.
 
 `agrees_with_ground_truth` is true when an `"elevated"` reading pairs with
@@ -373,11 +391,13 @@ that this must be reported as "X% agreement," never accuracy:
 
 ### A finding worth sitting with, not smoothing over
 
-All three fixtures share `company_response: "Closed with explanation"` and
-`timely: "Yes"` — both read as `"routine"` under this proxy. All three pipeline
-decisions are `ESCALATE_TO_HUMAN`. **So `agrees_with_ground_truth` is `false` for all
-three fixtures.** This is asserted explicitly in the self-test (not just tolerated) —
-a future change that silently flips it to `true` should be treated as a regression to
+All eight fixtures read as `"routine"` under this proxy — seven share
+`company_response: "Closed with explanation"` and `timely: "Yes"`; the eighth
+(24157609) is `"Closed with non-monetary relief"`, correctly read as routine too once
+the negative-lookbehind fix above landed. All eight pipeline decisions are
+`ESCALATE_TO_HUMAN`. **So `agrees_with_ground_truth` is `false` for all eight
+fixtures.** This is asserted explicitly in the self-test (not just tolerated) — a
+future change that silently flips it to `true` should be treated as a regression to
 investigate, not a fix to celebrate.
 
 This isn't the pipeline being wrong. It's a direct demonstration of exactly why Section
@@ -416,12 +436,14 @@ streamlit run dashboard/app.py
 [`scripts/export_dashboard_data.mjs`](scripts/export_dashboard_data.mjs) from
 `scripts/simulate_workflow.mjs`'s `execute()` run against the real, committed
 workflow JSON — not a separate, hand-maintained mock dataset. As of this build that's
-exactly **3 records** (the Section 6 fixtures) — every live ticket the Schedule/Manual
-trigger fetches still dead-ends at "Live Ticket (Awaiting Phase 7)" until Phase 7's
-Claude API swap. The dashboard shows that real n=3 honestly rather than padding the
-log with invented tickets to make charts look like a fuller pilot run — an in-app note
-under the KPI row says so explicitly, and nothing in the chart/KPI code assumes
-exactly 3 records, so it fills in correctly once a real pilot run accumulates more.
+**8 records** (the Section 6 fixtures A/B/C plus five real tickets D-H, hand-verified
+the same way — see "Pull a real batch of live tickets" below) — every other live ticket
+the Schedule/Manual trigger fetches still dead-ends at "Live Ticket (Awaiting Phase 7)"
+until Phase 7's Claude API swap. The dashboard shows that real, small n honestly rather
+than padding the log with invented tickets to make charts look like a fuller pilot run
+— an in-app note under the KPI row says so explicitly, and nothing in the chart/KPI
+code assumes an exact count, so it fills in correctly once a real pilot run accumulates
+more.
 
 **Pull a real batch of live tickets.** `pipeline_log.json` also carries a second,
 completely separate array, `awaiting_records`: real tickets fetched live from CFPB
@@ -442,15 +464,18 @@ never contaminate a metric. Pulling this batch was also the first time
 (`Get Watermark` → the real `CFPB Complaint Search` HTTP call → `Cap Batch & Advance
 Watermark`) — every earlier verification pass only ever exercised the fixture-trigger
 path, so this incidentally closed a real gap in Phase 1's own test coverage, four
-phases later.
+phases later. The first batch pulled 25; five of them (D-H above) were promoted to real
+fixtures, so a re-pull now shows 20 — `Route: Fixture or Live?` checks `FIXTURE_IDS`
+directly, so those five stopped dead-ending automatically the moment they joined it, no
+extra filtering code required.
 
 **Of Section 9's five KPIs, three are computed from real data, two are honestly deferred:**
 
 | KPI | Status | Why |
 |---|---|---|
-| Citation accuracy | **100%** (3/3) | QA-verified: Agent 3's exact-clause-fetch tool actually resolved every cited regulation against the real cached corpus |
-| Category agreement | **100%** (3/3) | Agent 1's classified issue matches CFPB's own filed issue *or* sub-issue — Ticket C's classification lands at the sub-issue level, which is why the comparison checks both |
-| Escalation agreement | **0%** (0/3) | Real, computed, and expected to read low — see the Phase 5 "finding worth sitting with" above; CFPB's outcome category is coarser than this pipeline's narrative-informed decision |
+| Citation accuracy | **100%** (4/4 cited drafts) | QA-verified: Agent 3's exact-clause-fetch tool actually resolved every cited regulation against the real cached corpus. Denominator is drafts that cite a regulation (4 of 8) — the other 4 genuinely found no match in this build's five-regulation corpus, see "Untested branches" above |
+| Category agreement | **100%** (8/8) | Agent 1's classified issue matches CFPB's own filed issue *or* sub-issue — Ticket C's classification lands at the sub-issue level, which is why the comparison checks both |
+| Escalation agreement | **0%** (0/8) | Real, computed, and expected to read low — see the Phase 5 "finding worth sitting with" above; CFPB's outcome category is coarser than this pipeline's narrative-informed decision |
 | Hours saved / ticket | **Awaiting Phase 7** | Requires a real, timed production run; only manual test-harness executions exist so far — reporting a number would fabricate exactly what this project has spent five phases refusing to fake |
 | SLA compliance | **Awaiting Phase 7** | Same reasoning as hours saved |
 

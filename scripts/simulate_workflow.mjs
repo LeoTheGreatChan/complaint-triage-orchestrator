@@ -166,11 +166,27 @@ async function main() {
 
   console.log(`Fixture run: ${escalated.length} escalated, ${autoResolved.length} auto-resolved, ${stuck.length} awaiting Phase 7, ${sheetsRows.length} rows reaching Google Sheets.`);
 
-  const expectedIds = ["9999970", "9999975", "9999983"];
+  const expectedIds = ["9999970", "9999975", "9999983", "24158082", "24157871", "24157473", "24157200", "24157609"];
   for (const id of expectedIds) {
     if (!escalated.some((e) => e.complaint_id === id)) failures.push(`Ticket ${id} did not reach Final: Escalate to Human Queue`);
   }
   if (stuck.length !== 0) failures.push(`Fixture tickets should never route to "Live Ticket (Awaiting Phase 7)", but ${stuck.length} did`);
+
+  // Two of the five newly-added real tickets (D/G) genuinely trip the
+  // real regulation-index search tool; three (E/F/H) genuinely don't --
+  // verify the tool ran and returned exactly what's documented, not a
+  // silently-stale or hand-typed value drifting from the real function.
+  const dResult = escalated.find((e) => e.complaint_id === "24158082");
+  if (!dResult || !dResult.agents.agent3.tool_result?.found) {
+    failures.push("Ticket D (24158082) should have a real, found FDCPA §1692g(b) clause fetched by Agent 3's tool");
+  }
+  for (const noCitationId of ["24157871", "24157473", "24157200", "24157609"]) {
+    const r = escalated.find((e) => e.complaint_id === noCitationId);
+    if (!r) continue;
+    if (r.agents.agent3.tool_used !== false || r.agents.agent3.output.cites_regulation !== false) {
+      failures.push(`Ticket ${noCitationId} should draft without citing a regulation (real regulation-index search found no match), got tool_used=${r.agents.agent3.tool_used}`);
+    }
+  }
 
   const cResult = escalated.find((e) => e.complaint_id === "9999983");
   if (cResult) {

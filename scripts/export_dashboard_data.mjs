@@ -48,9 +48,12 @@ async function main() {
   const autoResolved = trace["Final: Auto-Resolve"] || [];
 
   const records = [...escalated, ...autoResolved].map((r) => ({ ...r, source: "pilot_fixture" }));
-  // Stable order: chronological by the real date_received timestamps
-  // (spec v11 Section 3a) -- C (22:07) -> A (22:24) -> B (22:28).
-  const order = { "9999983": 0, "9999970": 1, "9999975": 2 };
+  // Stable order: chronological by the real date_received timestamps (the
+  // final record shape doesn't carry date_received, so this is a lookup
+  // table into FIXTURE_TICKETS's own order rather than a live sort) --
+  // C (2024-09-03T22:07) -> A (22:24) -> B (22:28) -> F (2026-07-14T00:02)
+  // -> G (00:03) -> H (00:11) -> D (00:13) -> E (00:17).
+  const order = { "9999983": 0, "9999970": 1, "9999975": 2, "24157473": 3, "24157200": 4, "24157609": 5, "24158082": 6, "24157871": 7 };
   records.sort((a, b) => (order[a.complaint_id] ?? 99) - (order[b.complaint_id] ?? 99));
 
   // Preserve whatever live batch already exists unless explicitly asked to

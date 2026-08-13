@@ -55,6 +55,24 @@ HTTP call, `Cap Batch & Advance Watermark`) — every previous verification only
 exercised the fixture-trigger path, so this incidentally closed a real gap in Phase 1's
 own test coverage, four phases later.
 
+**Five of that first 25-ticket batch were promoted to real fixtures (Tickets D-H),
+staying mock-first the whole way.** Rather than spend real Claude API credits (Phase 7
+is still explicitly deferred) or invent decisions for them, five tickets were
+hand-verified the same way the original three were: real CFPB taxonomy tool lookup,
+real regulation-index search against this build's five cached regulations, real
+deterministic synthetic CRM. `FIXTURE_TICKETS`/`FIXTURE_IDS`/`AGENT1-4_FIXTURES` in
+`scripts/build_workflow.js` now hold 8 tickets, not 3. Only 1 of the 5 new tickets
+(24158082) got a real regulation citation back from the tool — the other 4 genuinely
+exercise the "drafts/scores without a citation" branches that were structurally wired
+since Phase 3 but never taken by any fixture until now. Once these 5 IDs joined
+`FIXTURE_IDS`, `Route: Fixture or Live?` automatically stopped sending them to `Live
+Ticket (Awaiting Phase 7)` on the next live fetch — `awaiting_records` dropped from 25
+to 20 on its own, no special-case filtering code needed. This pass also caught a real
+bug: `computeGroundTruthAgreement`'s `/monetary relief/i` regex misread CFPB's distinct
+"Closed with non-monetary relief" category as monetary relief (the substring is right
+there) — fixed with a negative lookbehind once ticket 24157609 exercised that response
+value for the first time.
+
 ## KPIs: what's real, what's honestly deferred
 
 Of Section 9's five metrics, three are computed directly from the pipeline log
@@ -85,7 +103,7 @@ want to take another run at the chart-click version, the removed code (and the d
 commit.
 
 `render_auto_resolved_table` currently always renders its "no auto-resolved tickets
-yet" empty state, since none of the 3 real fixtures auto-resolve (same expected
+yet" empty state, since none of the 8 real fixtures auto-resolve (same expected
 imbalance as the KPIs) — verified against a temporary 1-escalate/1-auto-resolve test
 fixture swapped into `pipeline_log.json` and back, not against real data, since no real
 data with that shape exists yet.
@@ -93,14 +111,13 @@ data with that shape exists yet.
 ## Before a production / client-facing launch
 
 Right now the UI cites the spec directly in a few places — `"(spec Section 8)"`,
-`"spec Phase 3"`, `"Section 6 fixture tickets"`, `"(spec Section 14)"`, `"(spec Section
-3c)"` — deliberately, since during development that's the fastest way to trace an
-on-screen claim back to the exact requirement it satisfies. **A real user has no reason
-to know what "spec Section 8" means and it'll just read as unfinished or confusing.**
-Find every instance with:
+`"spec Phase 3"`, `"(spec Section 14)"`, `"(spec Section 3c)"` — deliberately, since
+during development that's the fastest way to trace an on-screen claim back to the exact
+requirement it satisfies. **A real user has no reason to know what "spec Section 8"
+means and it'll just read as unfinished or confusing.** Find every instance with:
 
 ```bash
-grep -n "spec Section\|spec Phase\|Section 6 fixture" dashboard/app.py
+grep -n "spec Section\|spec Phase" dashboard/app.py
 ```
 
 (Comments and docstrings can keep the references — they're for developers, not
@@ -109,8 +126,7 @@ calls need rewriting.) As of this build, the user-visible occurrences are:
 
 - The escalation-agreement KPI's sub-label ("...directional signal, not accuracy
   (Section 8)")
-- The "3 ticket(s) processed to date" note under the KPI row ("spec Phase 3", "Section
-  6 fixture tickets")
+- The "N ticket(s) processed to date" note under the KPI row ("spec Phase 3")
 - The Technical detail tab's caption ("(spec Section 10)")
 - The "Other required disclosures (spec Section 14)" expander title
 - The disclosure banner's text ("(spec Section 3c)")

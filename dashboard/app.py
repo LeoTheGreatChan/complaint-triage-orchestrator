@@ -7,13 +7,14 @@ this file computes and displays, it does not invent any pipeline logic of
 its own.
 
 Data honesty note (read before extending this file): as of this build, only
-the three Section 6 fixture tickets have a genuine pipeline decision --
-Phase 7's mock-to-real Claude API swap hasn't happened, so every live
-ticket the Schedule/Manual trigger fetches still dead-ends. This dashboard
-is built to show that real n=3 honestly (see EMPTY-STATE COPY below) rather
-than pad the log with invented tickets to make charts look fuller. When a
-real pilot run accumulates more records, this same code renders them --
-nothing here assumes exactly 3.
+tickets with hand-verified fixture data (spec Section 6's original three,
+plus any added since) have a genuine pipeline decision -- Phase 7's
+mock-to-real Claude API swap hasn't happened, so every other live ticket the
+Schedule/Manual trigger fetches still dead-ends. This dashboard is built to
+show that real, small n honestly (see EMPTY-STATE COPY below) rather than
+pad the log with invented tickets to make charts look fuller. When a real
+pilot run accumulates more records, this same code renders them -- nothing
+here assumes an exact count.
 
 Run: streamlit run dashboard/app.py
 """
@@ -536,7 +537,7 @@ def render_auto_resolved_table(records):
     )
 
 
-def render_awaiting_table(awaiting_records):
+def render_awaiting_table(awaiting_records, decided_count):
     # Real tickets, real CRM records, zero agent decision -- kept in its own
     # section so it can never be mistaken for a decided ticket or leak into
     # a KPI. See scripts/export_dashboard_data.mjs's module docstring.
@@ -562,7 +563,7 @@ def render_awaiting_table(awaiting_records):
             '<p class="section-caption">Fetched from the real CFPB API and given a real synthetic CRM '
             "record (Phase 1/2 both genuinely ran) — but no agent has looked at any of these. No "
             "severity, no draft, no escalation call. Excluded from every KPI and chart above, which are "
-            "computed only from the 3 tickets that have an actual pipeline decision.</p>",
+            f"computed only from the {decided_count} tickets that have an actual pipeline decision.</p>",
             unsafe_allow_html=True,
         )
         md_html(
@@ -633,13 +634,14 @@ def main():
         if len(records) < 10:
             st.markdown(
                 f'<p class="section-caption"><strong>{len(records)} ticket(s) processed to date</strong> — '
-                "this build's four agents are mock-first (spec Phase 3): only the three Section 6 fixture "
-                "tickets have a genuine pipeline decision. Real live-ticket volume arrives after Phase 7's "
-                "Claude API swap; charts below reflect exactly what's real today, not a padded sample.</p>",
+                "this build's four agents are mock-first (spec Phase 3): only tickets with hand-verified "
+                "fixture data (spec Section 6's original three, plus any added since) have a genuine "
+                "pipeline decision. Real live-ticket volume arrives after Phase 7's Claude API swap; charts "
+                "below reflect exactly what's real today, not a padded sample.</p>",
                 unsafe_allow_html=True,
             )
 
-        render_awaiting_table(awaiting_records)
+        render_awaiting_table(awaiting_records, len(records))
 
         cols = st.columns(5)
         hs_val, hs_sub = kpi_hours_saved()
