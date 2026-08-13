@@ -179,6 +179,54 @@ against a temporary 1-escalate/1-auto-resolve test fixture swapped into
 `pipeline_log.json` and back, since no real data with that shape existed yet; that gap
 is now closed with real, hand-verified tickets.
 
+## Category filter
+
+A "Filter by product category" `st.multiselect` sits above the two Overview charts and
+cascades to everything data-dependent on both tabs: the 5 KPI cards, the "Escalate vs.
+auto-resolve" chart, the Overview queue table, both Technical detail charts, the raw
+pipeline log, and the Technical detail tab's own label (`"Technical detail (Credit
+card)"` once a filter is active — empty selection falls back to "all", matching the tab
+label back to plain `"Technical detail"`). `main()` computes `filtered_records` once,
+before `st.tabs()` runs, and every downstream KPI/chart/table call takes that instead of
+the raw `records` list.
+
+**Why a dropdown instead of clicking the donut chart directly:** that was the original
+ask, tested and ruled out first. `st.plotly_chart(chart_category_breakdown(records),
+on_select="rerun", selection_mode="points")` was wired up and clicked live — 0 of 5 real
+slice clicks registered a selection, worse than the bar chart's already-flaky results
+(see "Queue view" above). Legend clicks are worse than flaky: they're structurally
+incapable of reaching Python at all. Clicking a Plotly legend entry only toggles that
+trace's client-side visibility (the "double-click to isolate" tooltip is native
+Plotly.js), which Streamlit's `on_select` never observes — confirmed live, the debug
+selection state stayed empty even while the chart visibly changed. A first pass shipped
+color-matched pill buttons (one per category, toggling membership in a
+`st.session_state` set) as a reliable alternative; replaced with `st.multiselect` on
+follow-up feedback, since Streamlit's own removable-tag rendering already gives the same
+"see what's selected, click an × to remove" affordance without hand-rolling chip CSS.
+
+**The donut chart itself stays built from the unfiltered `records`, with only the
+selected slice(s) at full color and the rest dimmed to `LIGHT_GREY`** — it's the filter
+control's own visual echo, so it shows the whole picture with the current selection
+highlighted, not a recomputed subset (recomputing it would make a single-category
+selection always render as a trivial 100% donut, which is correct but useless as a
+filter UI).
+
+**Two real Streamlit-internal CSS issues surfaced building this, unrelated to the filter
+logic itself:**
+- The empty-state message ("No results") that Streamlit's multiselect dropdown shows
+  when every option is already selected reads as clutter here, since there's never
+  anything meaningful left to add with only two categories — hidden globally via
+  `[data-testid="stSelectboxVirtualDropdownEmpty"] { display: none }`.
+- The 5 KPI cards didn't align to equal height despite `.kpi-card { height: 100% }` —
+  measured live at 126px-197px depending on each card's sub-label line count. The chain
+  from `st.columns()`'s flex row down to `.kpi-card` passes through an unnamed
+  Streamlit-internal centering `<div>` (`display: flex; align-items: center`, no
+  `data-testid`) that doesn't propagate the stretched height down to its child, so
+  `height: 100%` resolves against a shrink-wrapped ancestor instead of the row's tallest
+  card. Fixed with a `min-height: 200px` floor sized to the longest current sub-label
+  (Escalation agreement's four-line text) — simpler and more robust than chasing
+  undocumented internal DOM structure to fix the propagation itself.
+
 ## Before a production / client-facing launch
 
 Right now the UI cites the spec directly in a few places — `"(spec Section 8)"`,

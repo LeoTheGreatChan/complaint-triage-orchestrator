@@ -120,6 +120,16 @@ def inject_brand_css():
             border-radius: 8px;
             padding: 1.1rem 1.2rem;
             height: 100%;
+            /* `height: 100%` alone doesn't equalize these across the row --
+               Streamlit's own internal wrappers between st.columns()'s flex
+               row and this card (an unnamed centering div with
+               align-items: center among them) don't propagate height:100%
+               down the chain, so each card still shrinks to its own content
+               (verified live: 126px-197px across the 5 cards depending on
+               sub-label length). A min-height sized to the longest current
+               sub-label (Escalation agreement's 4-line text) is a simpler,
+               more robust fix than fighting undocumented internal DOM. */
+            min-height: 200px;
         }}
         .kpi-label {{
             font-size: 0.72rem;
@@ -235,6 +245,13 @@ def inject_brand_css():
             color: {SLATE};
             font-style: italic;
         }}
+
+        /* A multiselect with every option already picked (e.g. the category
+           filter with both categories selected) pops open to an empty "No
+           results" list on click -- there's genuinely nothing left to add,
+           so the message just reads as clutter. Hide it globally; no
+           dropdown in this dashboard needs it. */
+        [data-testid="stSelectboxVirtualDropdownEmpty"] {{ display: none !important; }}
 
         /* Queue card: the segmented control re-skinned as tabs attached
            directly to its table, not a separate widget floating above it
@@ -459,15 +476,24 @@ def chart_decision_breakdown(records):
     return plotly_brand_layout(fig, "Escalate vs. auto-resolve")
 
 
-def chart_category_breakdown(records):
+def chart_category_breakdown(records, selected=None):
     counts = {}
     for r in records:
         counts[r["product"]] = counts.get(r["product"], 0) + 1
+    labels = list(counts.keys())
+    base_colors = dict(zip(labels, CHART_SERIES))
+    # PREVIEW ONLY (not yet wired to KPIs/other charts/tables): dims any
+    # category not in `selected` -- empty/None selected means "all", so
+    # nothing dims.
+    if selected:
+        colors = [base_colors[l] if l in selected else LIGHT_GREY for l in labels]
+    else:
+        colors = [base_colors[l] for l in labels]
     fig = go.Figure(
         go.Pie(
-            labels=list(counts.keys()),
+            labels=labels,
             values=list(counts.values()),
-            marker=dict(colors=CHART_SERIES),
+            marker=dict(colors=colors),
             hole=0.55,
             textfont=dict(family="Inter, sans-serif"),
         )
@@ -717,6 +743,30 @@ def main():
     records = log["records"]
     awaiting_records = log.get("awaiting_records", [])
 
+    # Category filter: single source of truth for both tabs. Read directly
+    # from session_state rather than the st.multiselect(...) call itself,
+    # since that widget is declared further down (inside tab_overview) but
+    # this value is also needed here, before st.tabs() runs, for the
+    # Technical detail tab's dynamic label -- a keyed widget's session_state
+    # slot is already updated by the time the script re-runs, regardless of
+    # where in the script the widget itself is declared.
+    categories = []
+    seen_categories = set()
+    for r in records:
+        p = r["product"]
+        if p not in seen_categories:
+            seen_categories.add(p)
+            categories.append(p)
+    st.session_state.setdefault("category_filter_multiselect", [])
+    selected_categories = set(st.session_state.category_filter_multiselect)
+    filtered_records = [r for r in records if r["product"] in selected_categories] if selected_categories else records
+
+    technical_label = "Technical detail"
+    if selected_categories:
+        # Stable order matching the chart/legend/dropdown (categories'
+        # own insertion order), not sorted() or set iteration order.
+        technical_label = f"Technical detail ({', '.join(c for c in categories if c in selected_categories)})"
+
     # Seeds the queue-view toggle from a `?queue_view=...` URL query param --
     # must happen before st.segmented_control(key="queue_view") instantiates
     # below, since a keyed widget's session_state entry, once set, wins over
@@ -736,7 +786,7 @@ def main():
             # warns is a conflicting/undefined combination.
             st.session_state["queue_view"] = "Escalated to human"
 
-    tab_overview, tab_technical = st.tabs(["Overview", "Technical detail"])
+    tab_overview, tab_technical = st.tabs(["Overview", technical_label])
 
     with tab_overview:
         if len(records) < 50:
@@ -749,23 +799,47 @@ def main():
                 unsafe_allow_html=True,
             )
 
-        render_awaiting_table(awaiting_records, len(records))
+        render_awaiting_table(awaiting_records, len(filtered_records))
 
         cols = st.columns(5)
         hs_val, hs_sub = kpi_hours_saved()
         render_kpi_card(cols[0], "Hours saved / ticket", hs_val, hs_sub)
-        ca_val, ca_sub = kpi_citation_accuracy(records)
+        ca_val, ca_sub = kpi_citation_accuracy(filtered_records)
         render_kpi_card(cols[1], "Citation accuracy", ca_val, ca_sub)
         sla_val, sla_sub = kpi_sla_compliance()
         render_kpi_card(cols[2], "SLA compliance", sla_val, sla_sub)
-        ea_val, ea_sub = kpi_escalation_agreement(records)
+        ea_val, ea_sub = kpi_escalation_agreement(filtered_records)
         render_kpi_card(cols[3], "Escalation agreement", ea_val, ea_sub)
-        cat_val, cat_sub = kpi_category_agreement(records)
+        cat_val, cat_sub = kpi_category_agreement(filtered_records)
         render_kpi_card(cols[4], "Category agreement", cat_val, cat_sub)
 
         st.markdown("<br>", unsafe_allow_html=True)
+
+        # Category filter (categories/selected_categories/filtered_records
+        # computed earlier, before st.tabs()). Native Plotly click-to-select
+        # on the donut was tried and ruled out first: 0/5 real slice clicks
+        # registered a selection, and legend clicks are pure client-side
+        # trace-visibility toggles that never reach Streamlit's selection
+        # state at all -- worse than the bar chart's already-flaky results.
+        # This multiselect is a real, guaranteed-to-register widget instead.
+        #
+        # Positioned above both charts, not tucked under the donut: this is
+        # the primary filter (pick a category), with the escalate/auto-
+        # resolve bars beside the donut as the secondary filter within it --
+        # top-to-bottom placement matches that selection order.
+        st.multiselect(
+            "Filter by product category", options=categories, key="category_filter_multiselect",
+            placeholder="All categories shown — select to filter",
+        )
+
         left, right = st.columns(2)
         with left:
+            # Deliberately built from the unfiltered `records`, with only the
+            # selected slice(s) at full color and the rest dimmed -- this
+            # chart IS the filter control, so it shows the whole picture with
+            # the current selection highlighted, not a recomputed subset.
+            st.plotly_chart(chart_category_breakdown(records, selected_categories), width='stretch')
+        with right:
             # A Plotly bar-click -> table-jump interaction was tried first via
             # st.plotly_chart(..., on_select="rerun") and dropped after it
             # proved flaky under real clicks (re-verified live: sometimes a
@@ -782,7 +856,7 @@ def main():
             # instantiated, so this and the manual toggle both drive the same
             # single source of truth.
             with st.container(key="decision_chart_wrap"):
-                st.plotly_chart(chart_decision_breakdown(records), width='stretch')
+                st.plotly_chart(chart_decision_breakdown(filtered_records), width='stretch')
                 st.markdown(
                     """
                     <style>
@@ -808,8 +882,6 @@ def main():
                     """,
                     unsafe_allow_html=True,
                 )
-        with right:
-            st.plotly_chart(chart_category_breakdown(records), width='stretch')
 
         st.markdown('<div id="queue-section"></div>', unsafe_allow_html=True)
         if scroll_to_queue:
@@ -849,9 +921,9 @@ def main():
                 key="queue_view", label_visibility="collapsed",
             )
             if queue_view == "Auto-resolved":
-                render_auto_resolved_table(records)
+                render_auto_resolved_table(filtered_records)
             else:
-                render_queue_table(records)
+                render_queue_table(filtered_records)
 
     with tab_technical:
         st.markdown(
@@ -862,12 +934,12 @@ def main():
         render_agent_legend()
         left, right = st.columns(2)
         with left:
-            st.plotly_chart(chart_confidence_distribution(records), width='stretch')
+            st.plotly_chart(chart_confidence_distribution(filtered_records), width='stretch')
         with right:
-            st.plotly_chart(chart_tool_use_frequency(records), width='stretch')
+            st.plotly_chart(chart_tool_use_frequency(filtered_records), width='stretch')
 
         st.markdown("#### Raw pipeline log")
-        st.dataframe(pd.json_normalize(records), width='stretch', height=300)
+        st.dataframe(pd.json_normalize(filtered_records), width='stretch', height=300)
 
         with st.expander("Other required disclosures (spec Section 14)"):
             st.markdown(
