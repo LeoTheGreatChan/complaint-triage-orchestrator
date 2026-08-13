@@ -291,6 +291,17 @@ def inject_brand_css():
             overflow: visible !important;
             text-overflow: clip !important;
         }}
+        /* Exact (not prefix) match -- only the inactive-tab testid, so this
+           doesn't fight the active tab's own white background on hover.
+           The click already registers across the button's full box (it's a
+           real <button> spanning the whole tab cell, verified live), but
+           without this there was no visual feedback confirming that away
+           from the centered text, which reads as "only the label is
+           clickable" even though the whole area always was. */
+        .st-key-queue_card [data-testid="stBaseButton-segmented_control"]:hover {{
+            background: rgba(21, 62, 117, 0.06) !important;
+            color: {NAVY} !important;
+        }}
         .st-key-queue_card [data-testid^="stBaseButton-segmented_control"] * {{
             white-space: normal !important;
             overflow: visible !important;
