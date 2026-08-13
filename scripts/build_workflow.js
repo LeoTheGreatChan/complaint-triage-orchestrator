@@ -786,7 +786,7 @@ const jsFinalEscalate = `
 const t = $input.item.json;
 return {
   json: {
-    complaint_id: t.complaint_id, company: t.company, product: t.product, issue: t.issue,
+    complaint_id: t.complaint_id, company: t.company, product: t.product, issue: t.issue, sub_issue: t.sub_issue,
     decision: "ESCALATE_TO_HUMAN",
     crm_summary: { account_tier: t.crm.account_tier, tenure_years: t.crm.tenure_years, special_population_flag: t.crm.special_population_flag },
     agents: {
@@ -808,7 +808,7 @@ const jsFinalAutoResolve = `
 const t = $input.item.json;
 return {
   json: {
-    complaint_id: t.complaint_id, company: t.company, product: t.product, issue: t.issue,
+    complaint_id: t.complaint_id, company: t.company, product: t.product, issue: t.issue, sub_issue: t.sub_issue,
     decision: "AUTO_RESOLVE",
     draft: t.agent3_output ? t.agent3_output.draft : null,
     agents: {
