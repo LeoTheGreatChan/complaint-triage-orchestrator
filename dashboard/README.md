@@ -75,7 +75,15 @@ anyone who isn't reading the spec alongside it.
 
 ## Swapping in a live Google Sheets read later
 
-`app.py`'s only coupling to the local-file data source is `load_pipeline_log()`.
-When storage (spec Section 11) gets wired, replacing that one function with a Sheets
-read is the whole change — every KPI/chart function downstream already takes a plain
-list of record dicts and doesn't know or care where they came from.
+`app.py`'s only coupling to the local-file data source is `load_pipeline_log()`. The
+n8n side of storage now exists (`Google Sheets: Log Decision`, see the main README's
+"Storage and dedup" — still untested against a live Sheets, but structurally wired),
+so once that's confirmed working, replacing this one function with a Sheets read is
+the whole dashboard-side change — every KPI/chart function downstream already takes a
+plain list of record dicts and doesn't know or care where they came from. Column names
+in the row this dashboard would read match `scripts/build_workflow.js`'s
+`flattenForSheets()` output, not `pipeline_log.json`'s current nested shape — the flat
+`agent1_severity`/`agent2_citation`/etc. columns, not `agents.agent1.output.severity`
+— so `load_pipeline_log()`'s replacement needs to reshape those flat columns back into
+the nested form every other function in this file expects, or those functions need
+updating to match. Not a large change, just not a completely free one.

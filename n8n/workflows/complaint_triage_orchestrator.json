@@ -610,6 +610,63 @@
         4920,
         -20
       ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "// Flattens a final record into single-level columns for the Google Sheets\n// node that follows (spec Section 11). complaint_id is the dedup key --\n// the Sheets node's Append-or-Update operation matches on it, so a\n// re-processed ticket (the date-level watermark overlap noted since\n// Phase 1) updates its existing row instead of duplicating it.\nfunction flattenForSheets(record) {\r\n  const a1 = record.agents.agent1.output || {};\r\n  // Agent 1's output is either {issue, severity, confidence} (clean match)\r\n  // or {issues: [...], primary_issue} (Ticket C's compound-issue schema) --\r\n  // resolve to the primary issue's own severity/confidence either way.\r\n  let agent1Severity = a1.severity;\r\n  let agent1Confidence = a1.confidence;\r\n  if (a1.issues) {\r\n    const primary = a1.issues.find((i) => i.issue === a1.primary_issue);\r\n    agent1Severity = primary ? primary.severity : null;\r\n    agent1Confidence = primary ? primary.confidence : null;\r\n  }\r\n\r\n  const a2 = record.agents.agent2.output || {};\r\n  const a3 = record.agents.agent3.output || {};\r\n  const a4 = record.agents.agent4.output || {};\r\n  const sig = record.escalation_signals || {};\r\n  const gt = record.ground_truth || {};\r\n\r\n  return {\r\n    complaint_id: record.complaint_id,\r\n    company: record.company,\r\n    product: record.product,\r\n    issue: record.issue,\r\n    sub_issue: record.sub_issue || \"\",\r\n    decision: record.decision,\r\n    agent1_severity: agent1Severity || \"\",\r\n    agent1_confidence: agent1Confidence ?? \"\",\r\n    agent1_tool_used: record.agents.agent1.tool_used,\r\n    agent2_applicable_regulation: a2.applicable_regulation || \"\",\r\n    agent2_citation: a2.citation || \"\",\r\n    agent2_special_population_flag: a2.special_population_flag ?? \"\",\r\n    agent2_broader_crm_lookup_used: record.agents.agent2.broader_crm_lookup_used,\r\n    agent3_cites_regulation: a3.cites_regulation ?? \"\",\r\n    agent3_draft: a3.draft || \"\",\r\n    agent4_confidence: a4.confidence ?? \"\",\r\n    agent4_requires_human: a4.requires_human ?? \"\",\r\n    agent4_reason: a4.reason || \"\",\r\n    escalate_requires_human: sig.requiresHuman ?? \"\",\r\n    escalate_low_confidence: sig.lowConfidence ?? \"\",\r\n    escalate_high_risk_issue: sig.isHighRiskIssue ?? \"\",\r\n    escalate_repeat_complainant: sig.isRepeatComplainant ?? \"\",\r\n    escalate_high_value_account: sig.isHighValueAccount ?? \"\",\r\n    escalate_monetary_threshold: sig.exceedsMonetaryThreshold ?? \"\",\r\n    escalate_stated_monetary_exposure: sig.statedMonetaryExposure ?? \"\",\r\n    cfpb_company_response: gt.cfpb_company_response || \"\",\r\n    cfpb_timely: gt.cfpb_timely || \"\",\r\n    cfpb_disputed_flag: gt.cfpb_disputed_flag || \"\",\r\n    ground_truth_signal: gt.ground_truth_signal || \"\",\r\n    agrees_with_ground_truth: gt.agrees_with_ground_truth ?? \"\",\r\n    crm_account_tier: record.crm_summary ? record.crm_summary.account_tier : \"\",\r\n    crm_tenure_years: record.crm_summary ? record.crm_summary.tenure_years : \"\",\r\n    crm_special_population_flag: record.crm_summary ? record.crm_summary.special_population_flag : \"\",\r\n  };\r\n}\n\nconst record = $input.item.json;\nreturn { json: flattenForSheets(record) };"
+      },
+      "id": "b2f7d3a1-0000-4000-8000-000000000019",
+      "name": "Prepare Row for Google Sheets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5140,
+        -140
+      ],
+      "notesInFlow": true,
+      "notes": "Flattens either final-record shape into single-level columns. complaint_id is the dedup key the next node matches on."
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "list",
+          "cachedResultName": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "complaint_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "b2f7d3a1-0000-4000-8000-00000000001a",
+      "name": "Google Sheets: Log Decision",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        5360,
+        -140
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "REPLACE_WITH_YOUR_CREDENTIAL_NAME"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Spec Section 11 -- Append-or-Update, matchingColumns=[complaint_id]. This is the actual dedup mechanism for the date-level watermark overlap noted since Phase 1: a re-processed complaint_id updates its existing row rather than duplicating it. REPLACE the documentId/sheetName/credentials placeholders before running -- untested against live n8n/Sheets, see the code comment above googleSheetsNode()."
     }
   ],
   "connections": {
@@ -946,6 +1003,39 @@
         [
           {
             "node": "Final: Auto-Resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final: Escalate to Human Queue": {
+      "main": [
+        [
+          {
+            "node": "Prepare Row for Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final: Auto-Resolve": {
+      "main": [
+        [
+          {
+            "node": "Prepare Row for Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Row for Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: Log Decision",
             "type": "main",
             "index": 0
           }

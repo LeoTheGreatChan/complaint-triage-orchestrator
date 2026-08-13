@@ -32,9 +32,9 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const OUT_PATH = path.join(REPO_ROOT, "dashboard/data/pipeline_log.json");
 
 function main() {
-  const results = execute("Fixture Test Trigger (A/B/C)", [{}]);
-  const escalated = results["Final: Escalate to Human Queue"] || [];
-  const autoResolved = results["Final: Auto-Resolve"] || [];
+  const { trace } = execute("Fixture Test Trigger (A/B/C)", [{}]);
+  const escalated = trace["Final: Escalate to Human Queue"] || [];
+  const autoResolved = trace["Final: Auto-Resolve"] || [];
 
   const records = [...escalated, ...autoResolved].map((r) => ({ ...r, source: "pilot_fixture" }));
   // Stable order: chronological by the real date_received timestamps

@@ -48,10 +48,22 @@ function runIfNode(node, items) {
   return [items.filter((it) => it[field] === true), items.filter((it) => it[field] !== true)];
 }
 
-/** Execute starting from a given node, following connections, returning a
- * map of terminal-node-name -> items that reached it. */
+/**
+ * Execute starting from a given node, following connections.
+ *
+ * Returns { trace, terminal }:
+ *   - trace[nodeName]: every item that ever passed THROUGH that node
+ *     (accumulated across however many times it was invoked -- a node fed
+ *     by two upstream branches, like the shared Sheets-prep step here, runs
+ *     once per branch, and both runs' items land in the same trace entry).
+ *   - terminal[nodeName]: same accumulation, but only for nodes with no
+ *     outgoing connection -- the actual end-of-graph results.
+ * Most callers want `trace` for a specific node's rich output shape;
+ * `terminal` is for "what came out the end of the whole graph."
+ */
 export function execute(startNodeName, initialItems) {
-  const terminalResults = {};
+  const trace = {};
+  const terminal = {};
   const queue = [[startNodeName, initialItems]];
 
   while (queue.length > 0) {
@@ -68,34 +80,48 @@ export function execute(startNodeName, initialItems) {
     }
     if (node.type === "n8n-nodes-base.if") {
       const [trueItems, falseItems] = runIfNode(node, items);
+      trace[nodeName] = (trace[nodeName] || []).concat(trueItems, falseItems);
       for (const conn of outgoing[0] || []) queue.push([conn.node, trueItems]);
       for (const conn of outgoing[1] || []) queue.push([conn.node, falseItems]);
       continue;
     }
     if (node.type === "n8n-nodes-base.code") {
       const outItems = runCodeNode(node, items);
+      trace[nodeName] = (trace[nodeName] || []).concat(outItems);
       if (!outgoing[0] || outgoing[0].length === 0) {
-        terminalResults[nodeName] = (terminalResults[nodeName] || []).concat(outItems);
+        terminal[nodeName] = (terminal[nodeName] || []).concat(outItems);
       } else {
         for (const conn of outgoing[0]) queue.push([conn.node, outItems]);
       }
       continue;
     }
+    if (node.type === "n8n-nodes-base.googleSheets") {
+      // Can't actually call the Sheets API here (no live credentials, no
+      // live n8n) -- treat as a terminal that records what WOULD be
+      // written, same shape as any other terminal Code node. This proves
+      // the right rows reach the node, not that the write itself works;
+      // the write is untested, see the code comment above
+      // googleSheetsNode() in build_workflow.js.
+      trace[nodeName] = (trace[nodeName] || []).concat(items);
+      terminal[nodeName] = (terminal[nodeName] || []).concat(items);
+      continue;
+    }
     throw new Error(`Simulator doesn't know how to run node type: ${node.type} (node "${nodeName}")`);
   }
 
-  return terminalResults;
+  return { trace, terminal };
 }
 
 function main() {
   const failures = [];
 
-  const results = execute("Fixture Test Trigger (A/B/C)", [{}]);
-  const escalated = results["Final: Escalate to Human Queue"] || [];
-  const autoResolved = results["Final: Auto-Resolve"] || [];
-  const stuck = results["Live Ticket (Awaiting Phase 7)"] || [];
+  const { trace, terminal } = execute("Fixture Test Trigger (A/B/C)", [{}]);
+  const escalated = trace["Final: Escalate to Human Queue"] || [];
+  const autoResolved = trace["Final: Auto-Resolve"] || [];
+  const stuck = terminal["Live Ticket (Awaiting Phase 7)"] || [];
+  const sheetsRows = terminal["Google Sheets: Log Decision"] || [];
 
-  console.log(`Fixture run: ${escalated.length} escalated, ${autoResolved.length} auto-resolved, ${stuck.length} awaiting Phase 7.`);
+  console.log(`Fixture run: ${escalated.length} escalated, ${autoResolved.length} auto-resolved, ${stuck.length} awaiting Phase 7, ${sheetsRows.length} rows reaching Google Sheets.`);
 
   const expectedIds = ["9999970", "9999975", "9999983"];
   for (const id of expectedIds) {
@@ -128,16 +154,31 @@ function main() {
   // Non-fixture ticket must dead-end, not fabricate a decision. Splice in a
   // fake post-CRM-generation item directly (the simulator doesn't run the
   // real CFPB HTTP Request node) to exercise the shared Route/IF gate.
-  const liveResults = execute("Route: Fixture or Live?", [{ complaint_id: "24121673", product: "Credit card", crm: { special_population_flag: false } }]);
-  if (!liveResults["Live Ticket (Awaiting Phase 7)"] || liveResults["Live Ticket (Awaiting Phase 7)"].length !== 1) {
+  const liveRun = execute("Route: Fixture or Live?", [{ complaint_id: "24121673", product: "Credit card", crm: { special_population_flag: false } }]);
+  const liveStuck = liveRun.terminal["Live Ticket (Awaiting Phase 7)"] || [];
+  if (liveStuck.length !== 1) {
     failures.push("Non-fixture ticket did not route to Live Ticket (Awaiting Phase 7) as expected");
+  }
+
+  // Google Sheets dedup row (spec Section 11): every processed ticket --
+  // escalated or not -- must reach the Sheets node with complaint_id
+  // present (the Append-or-Update matching column) and a flat, primitive
+  // shape (no nested objects a real Sheets cell can't hold).
+  if (sheetsRows.length !== escalated.length + autoResolved.length) {
+    failures.push(`Expected ${escalated.length + autoResolved.length} rows reaching Google Sheets (all processed tickets), got ${sheetsRows.length}`);
+  }
+  for (const row of sheetsRows) {
+    if (!row.complaint_id) failures.push(`Sheets row missing complaint_id (the dedup key): ${JSON.stringify(row)}`);
+    for (const [key, val] of Object.entries(row)) {
+      if (val !== null && typeof val === "object") failures.push(`Sheets row field "${key}" is a nested object, not a flat value -- Sheets can't store this: ${JSON.stringify(val)}`);
+    }
   }
 
   if (failures.length > 0) {
     console.error("SIMULATION FAILED:\n" + failures.map((f) => `  - ${f}`).join("\n"));
     process.exit(1);
   }
-  console.log("PASS: workflow JSON, executed exactly as n8n would run it, produces the expected fixture escalations and correctly stops at the live-ticket boundary.");
+  console.log("PASS: workflow JSON, executed exactly as n8n would run it, produces the expected fixture escalations, correctly stops at the live-ticket boundary, and every processed ticket reaches Google Sheets as a flat, keyed row.");
 }
 
 main();

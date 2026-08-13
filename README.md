@@ -139,10 +139,9 @@ hand-off schema and the twelve updated fixtures.
 CFPB's `date_received_min` filter only accepts date granularity (`YYYY-MM-DD`) — the
 live API rejects sub-day timestamps (confirmed by testing, not assumed). That means a
 same-day poll can legitimately re-return complaints already fetched earlier that day.
-This workflow does **not** dedup — by design, per spec Section 11, dedup-by-complaint-ID
-belongs to the storage layer (Google Sheets Append-or-Update), which isn't wired until a
-later phase. Whichever phase wires Google Sheets needs to actually implement that dedup;
-it's load-bearing, not a nice-to-have, given this watermark behavior.
+This workflow does **not** dedup here — by design, per spec Section 11, dedup-by-complaint-ID
+belongs to the storage layer (Google Sheets Append-or-Update). **Resolved:** see
+"Storage and dedup" below — no longer an open gap.
 
 ### How to import into n8n
 
@@ -377,10 +376,10 @@ This isn't the pipeline being wrong. It's a direct demonstration of exactly why 
 a coarse administrative label (essentially "the company closed the case and gave an
 explanation," true of the overwhelming majority of complaints regardless of severity),
 while the pipeline's escalation decision draws on the narrative, the real regulation
-text, and the CRM record. A real pilot run's aggregate agreement rate (once storage
-accumulates enough tickets to be meaningful — not yet wired, see Phase 1's dedup note)
-should be read as "how often does CFPB's coarse label happen to line up with a
-richer decision," not as ground truth the pipeline is being graded against.
+text, and the CRM record. A real pilot run's aggregate agreement rate (once the Google
+Sheets storage layer — see "Storage and dedup" — has accumulated enough real tickets
+to be meaningful) should be read as "how often does CFPB's coarse label happen to line
+up with a richer decision," not as ground truth the pipeline is being graded against.
 
 ### Testing
 
@@ -437,8 +436,42 @@ that strips leading whitespace from every line independently before rendering �
 by actually loading the app in a browser and looking at it, not just by the code
 compiling.
 
+## Storage and dedup
+
+Built ahead of Phase 7, deliberately — the user wants to stay mock-first and keep
+real Claude API cost at zero until everything else is finalized, and "confirm dedup
+holds" is one of Phase 7's own checklist items, so dedup needs to already exist before
+that verification can happen at all.
+
+Two new nodes after both `Final: *` nodes: `Prepare Row for Google Sheets` (Code node
+— flattens either final-record shape into single-level columns; the row-flattening
+logic, `flattenForSheets`, lives once in `scripts/build_workflow.js` like everything
+else and is unit-tested there) → `Google Sheets: Log Decision` (`n8n-nodes-base.googleSheets`,
+`operation: appendOrUpdate`, `matchingColumns: ["complaint_id"]`). That matching column
+is the actual dedup mechanism: a re-processed `complaint_id` — which the date-level
+watermark overlap flagged since Phase 1 makes a real, expected occurrence, not an edge
+case — updates its existing Sheets row instead of appending a duplicate.
+
+**This is the one part of the workflow that is genuinely untested**, unlike everything
+else in this build. Every Code/IF node has been verified two ways — the generator's
+self-test and `scripts/simulate_workflow.mjs` executing the real committed JSON — but
+neither can call the actual Google Sheets API: there's no live n8n instance and no
+Google credentials available in this environment. What *is* verified: the simulator
+now treats the Sheets node as a terminal that records what would be written, and
+confirms every processed ticket reaches it with `complaint_id` present and every field
+flattened to a primitive (no nested objects a real Sheets cell can't hold). What is
+**not** verified: that the `googleSheets` node's parameter schema is exactly right for a
+current n8n version, or that the Append-or-Update operation actually dedups the way
+described. `documentId`, `sheetName`, and `credentials` are all placeholder values —
+replace them with your own spreadsheet ID and Google Sheets OAuth2 credential before
+running this, and treat the whole node as needing a real import-and-run check on your
+end, not just a code review.
+
 ## Not yet built (Phase 7)
 
-Verification, including the mock-to-real Claude API swap and the storage/dedup layer
-flagged in Phase 1. The dashboard's aggregate "% agreement" figure is real but thin
-(n=3) until a real pilot run accumulates more tickets through Phase 7's real agents.
+Verification, including the mock-to-real Claude API swap — deliberately held back for
+now to keep real API cost at zero until everything else is finalized. Also awaiting
+Phase 7: a real, live-tested confirmation that the Google Sheets storage/dedup node
+above actually works (see "Storage and dedup"). The dashboard's aggregate "% agreement"
+figure is real but thin (n=3) until a real pilot run accumulates more tickets through
+Phase 7's real agents.

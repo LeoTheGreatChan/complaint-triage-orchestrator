@@ -361,6 +361,69 @@ function computeGroundTruthAgreement(ticket, escalate) {
   };
 }
 
+// Flattens a final record (either Final: Escalate to Human Queue's or Final:
+// Auto-Resolve's shape) into a single-level object of primitives -- the
+// input Google Sheets' Append-or-Update operation needs, spec Section 11.
+// `matchingColumns: ["complaint_id"]` on that node is what makes this the
+// dedup mechanism: a re-run that re-processes the same complaint_id (the
+// date-level watermark overlap noted since Phase 1) updates the existing
+// row instead of appending a duplicate.
+function flattenForSheets(record) {
+  const a1 = record.agents.agent1.output || {};
+  // Agent 1's output is either {issue, severity, confidence} (clean match)
+  // or {issues: [...], primary_issue} (Ticket C's compound-issue schema) --
+  // resolve to the primary issue's own severity/confidence either way.
+  let agent1Severity = a1.severity;
+  let agent1Confidence = a1.confidence;
+  if (a1.issues) {
+    const primary = a1.issues.find((i) => i.issue === a1.primary_issue);
+    agent1Severity = primary ? primary.severity : null;
+    agent1Confidence = primary ? primary.confidence : null;
+  }
+
+  const a2 = record.agents.agent2.output || {};
+  const a3 = record.agents.agent3.output || {};
+  const a4 = record.agents.agent4.output || {};
+  const sig = record.escalation_signals || {};
+  const gt = record.ground_truth || {};
+
+  return {
+    complaint_id: record.complaint_id,
+    company: record.company,
+    product: record.product,
+    issue: record.issue,
+    sub_issue: record.sub_issue || "",
+    decision: record.decision,
+    agent1_severity: agent1Severity || "",
+    agent1_confidence: agent1Confidence ?? "",
+    agent1_tool_used: record.agents.agent1.tool_used,
+    agent2_applicable_regulation: a2.applicable_regulation || "",
+    agent2_citation: a2.citation || "",
+    agent2_special_population_flag: a2.special_population_flag ?? "",
+    agent2_broader_crm_lookup_used: record.agents.agent2.broader_crm_lookup_used,
+    agent3_cites_regulation: a3.cites_regulation ?? "",
+    agent3_draft: a3.draft || "",
+    agent4_confidence: a4.confidence ?? "",
+    agent4_requires_human: a4.requires_human ?? "",
+    agent4_reason: a4.reason || "",
+    escalate_requires_human: sig.requiresHuman ?? "",
+    escalate_low_confidence: sig.lowConfidence ?? "",
+    escalate_high_risk_issue: sig.isHighRiskIssue ?? "",
+    escalate_repeat_complainant: sig.isRepeatComplainant ?? "",
+    escalate_high_value_account: sig.isHighValueAccount ?? "",
+    escalate_monetary_threshold: sig.exceedsMonetaryThreshold ?? "",
+    escalate_stated_monetary_exposure: sig.statedMonetaryExposure ?? "",
+    cfpb_company_response: gt.cfpb_company_response || "",
+    cfpb_timely: gt.cfpb_timely || "",
+    cfpb_disputed_flag: gt.cfpb_disputed_flag || "",
+    ground_truth_signal: gt.ground_truth_signal || "",
+    agrees_with_ground_truth: gt.agrees_with_ground_truth ?? "",
+    crm_account_tier: record.crm_summary ? record.crm_summary.account_tier : "",
+    crm_tenure_years: record.crm_summary ? record.crm_summary.tenure_years : "",
+    crm_special_population_flag: record.crm_summary ? record.crm_summary.special_population_flag : "",
+  };
+}
+
 // ===========================================================================
 // Self-test: run the full pipeline over the three fixtures + one negative
 // control before this script is allowed to (re)generate the workflow file.
@@ -487,11 +550,56 @@ function selfTest() {
   // Non-fixture complaint_id must not silently fabricate a decision.
   if (AGENT1_FIXTURES["24121673"]) failures.push("Unexpected fixture found for a non-fixture complaint_id");
 
+  // Google Sheets row flattening (spec Section 11): Ticket C's compound-issue
+  // schema must resolve to the PRIMARY issue's severity/confidence, not
+  // undefined -- this is the one shape difference from Tickets A/B that a
+  // naive flattener would miss.
+  const cFinalRecord = {
+    complaint_id: "9999983", company: "JPMORGAN CHASE & CO.", product: "Credit card",
+    issue: "Getting a credit card", sub_issue: "Card opened without my consent or knowledge",
+    decision: "ESCALATE_TO_HUMAN",
+    crm_summary: { account_tier: "Standard", tenure_years: 3, special_population_flag: false },
+    agents: {
+      agent1: { tool_used: true, output: cResult.agent1_output },
+      agent2: { broader_crm_lookup_used: true, output: cResult.agent2_output },
+      agent3: { tool_used: true, output: cResult.agent3_output },
+      agent4: { tool_used: true, output: cResult.agent4_output },
+    },
+    escalation_signals: cResult.signals,
+    ground_truth: cResult.ground_truth,
+  };
+  const cRow = flattenForSheets(cFinalRecord);
+  if (cRow.agent1_severity !== "High" || cRow.agent1_confidence !== 0.78) {
+    failures.push(`Ticket C row: expected primary-issue severity/confidence (High/0.78), got ${cRow.agent1_severity}/${cRow.agent1_confidence}`);
+  }
+  if (cRow.complaint_id !== "9999983") failures.push("Ticket C row: complaint_id missing or wrong -- this is the dedup key, must never be blank");
+  if (typeof cRow.agent1_tool_used !== "boolean") failures.push(`Ticket C row: agent1_tool_used should be a real boolean for a clean Sheets column, got ${typeof cRow.agent1_tool_used}`);
+
+  // Auto-resolve shape (no fixture currently produces one -- see the
+  // "untested branches" note -- so this constructs the shape directly to
+  // confirm the flattener doesn't assume every record escalated).
+  const autoResolveRecord = {
+    complaint_id: "TEST-AUTO", company: "Test Co", product: "Debt collection",
+    issue: "Communication tactics", sub_issue: "",
+    decision: "AUTO_RESOLVE",
+    agents: {
+      agent1: { tool_used: false, output: { issue: "Communication tactics", severity: "Low", confidence: 0.95 } },
+      agent2: { broader_crm_lookup_used: false, output: { special_population_flag: false, applicable_regulation: null, citation: null } },
+      agent3: { tool_used: false, output: null },
+      agent4: { tool_used: false, output: { confidence: 0.95, requires_human: false } },
+    },
+    escalation_signals: { requiresHuman: false, lowConfidence: false, isHighRiskIssue: false, isRepeatComplainant: false, isHighValueAccount: false, exceedsMonetaryThreshold: false, statedMonetaryExposure: null },
+    ground_truth: { cfpb_company_response: "Closed with explanation", cfpb_timely: "Yes", ground_truth_signal: "routine", agrees_with_ground_truth: true },
+  };
+  const autoRow = flattenForSheets(autoResolveRecord);
+  if (autoRow.decision !== "AUTO_RESOLVE") failures.push("Auto-resolve row: decision field wrong");
+  if (autoRow.agent3_draft !== "") failures.push(`Auto-resolve row: agent3_draft should be empty string when Agent 3's tool wasn't used and output is null, got "${autoRow.agent3_draft}"`);
+
   if (failures.length > 0) {
     console.error("SELF-TEST FAILED:\n" + failures.map((f) => `  - ${f}`).join("\n"));
     process.exit(1);
   }
-  console.log(`Self-test passed: ${FIXTURE_TICKETS.length}/${FIXTURE_TICKETS.length} fixtures escalate as expected, negative control holds, taxonomy discrepancy correctly reflected, ground-truth proxy behaves as documented.`);
+  console.log(`Self-test passed: ${FIXTURE_TICKETS.length}/${FIXTURE_TICKETS.length} fixtures escalate as expected, negative control holds, taxonomy discrepancy correctly reflected, ground-truth proxy behaves as documented, Sheets row flattening handles both decision shapes.`);
 }
 
 selfTest();
@@ -529,6 +637,49 @@ function ifNode({ id, name, leftValueExpr, position, notes }) {
   };
   if (notes) { node.notesInFlow = true; node.notes = notes; }
   return node;
+}
+
+// UNTESTED AGAINST A LIVE N8N INSTANCE. This project has no access to a
+// running n8n or Google Sheets credentials to import/execute against, so
+// this node's exact parameter shape (n8n's googleSheets node schema drifts
+// across versions) is built to the best available knowledge, not verified
+// the way every Code/IF node in this file has been (self-test +
+// simulate_workflow.mjs, which only understands trigger/code/if node
+// types and does not attempt to execute this one -- see its notes).
+// Confirm on import; fix up documentId/sheetName/credentials either way,
+// since those are placeholders only you can fill in.
+function googleSheetsNode({ id, name, position, notes }) {
+  return {
+    parameters: {
+      operation: "appendOrUpdate",
+      documentId: {
+        __rl: true,
+        value: "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID",
+        mode: "id",
+      },
+      sheetName: {
+        __rl: true,
+        value: "Sheet1",
+        mode: "list",
+        cachedResultName: "Sheet1",
+      },
+      columns: {
+        mappingMode: "autoMapInputData",
+        matchingColumns: ["complaint_id"],
+        schema: [],
+      },
+      options: {},
+    },
+    id, name, type: "n8n-nodes-base.googleSheets", typeVersion: 4.5, position,
+    credentials: {
+      googleSheetsOAuth2Api: {
+        id: "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+        name: "REPLACE_WITH_YOUR_CREDENTIAL_NAME",
+      },
+    },
+    notesInFlow: true,
+    notes: notes || "",
+  };
 }
 
 function connect(fromName, toName, outputIndex = 0) {
@@ -831,6 +982,18 @@ const t = $input.item.json;
 return { json: { complaint_id: t.complaint_id, product: t.product, note: "Live ticket -- no Phase 3 mock fixture exists for this complaint_id. Awaiting the real Claude API swap at Phase 7." } };
 `.trim();
 
+const jsPrepareRowForSheets = `
+// Flattens a final record into single-level columns for the Google Sheets
+// node that follows (spec Section 11). complaint_id is the dedup key --
+// the Sheets node's Append-or-Update operation matches on it, so a
+// re-processed ticket (the date-level watermark overlap noted since
+// Phase 1) updates its existing row instead of duplicating it.
+${flattenForSheets.toString()}
+
+const record = $input.item.json;
+return { json: flattenForSheets(record) };
+`.trim();
+
 // --- Assemble nodes ---
 const nodes = [
   { parameters: {}, id: "b2f7d3a1-0000-4000-8000-000000000001", name: "Fixture Test Trigger (A/B/C)", type: "n8n-nodes-base.manualTrigger", typeVersion: 1, position: [-400, 320] },
@@ -862,6 +1025,8 @@ const nodes = [
   ifNode({ id: "b2f7d3a1-0000-4000-8000-000000000015", name: "IF: Escalate?", leftValueExpr: "={{ $json.escalate }}", position: [4700, -140], notes: "Deterministic gate (spec Section 7) -- compound OR over five independent signals computed upstream, not a fifth agent call." }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000016", name: "Final: Escalate to Human Queue", mode: "runOnceForEachItem", jsCode: jsFinalEscalate, position: [4920, -260] }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000017", name: "Final: Auto-Resolve", mode: "runOnceForEachItem", jsCode: jsFinalAutoResolve, position: [4920, -20] }),
+  codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000019", name: "Prepare Row for Google Sheets", mode: "runOnceForEachItem", jsCode: jsPrepareRowForSheets, position: [5140, -140], notes: "Flattens either final-record shape into single-level columns. complaint_id is the dedup key the next node matches on." }),
+  googleSheetsNode({ id: "b2f7d3a1-0000-4000-8000-00000000001a", name: "Google Sheets: Log Decision", position: [5360, -140], notes: "Spec Section 11 -- Append-or-Update, matchingColumns=[complaint_id]. This is the actual dedup mechanism for the date-level watermark overlap noted since Phase 1: a re-processed complaint_id updates its existing row rather than duplicating it. REPLACE the documentId/sheetName/credentials placeholders before running -- untested against live n8n/Sheets, see the code comment above googleSheetsNode()." }),
 ];
 
 const connections = [
@@ -899,6 +1064,10 @@ const connections = [
   { from: "Compute Ground-Truth Agreement", to: "IF: Escalate?", fromOutput: 0 },
   { from: "IF: Escalate?", to: "Final: Escalate to Human Queue", fromOutput: 0 },
   { from: "IF: Escalate?", to: "Final: Auto-Resolve", fromOutput: 1 },
+
+  { from: "Final: Escalate to Human Queue", to: "Prepare Row for Google Sheets", fromOutput: 0 },
+  { from: "Final: Auto-Resolve", to: "Prepare Row for Google Sheets", fromOutput: 0 },
+  { from: "Prepare Row for Google Sheets", to: "Google Sheets: Log Decision", fromOutput: 0 },
 ];
 
 // This script fully owns every node/connection it defines above (Phase 3's
