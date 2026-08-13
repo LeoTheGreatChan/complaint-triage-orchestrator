@@ -631,7 +631,7 @@ def main():
     tab_overview, tab_technical = st.tabs(["Overview", "Technical detail"])
 
     with tab_overview:
-        if len(records) < 10:
+        if len(records) < 50:
             st.markdown(
                 f'<p class="section-caption"><strong>{len(records)} ticket(s) processed to date</strong> — '
                 "this build's four agents are mock-first (spec Phase 3): only tickets with hand-verified "

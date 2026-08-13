@@ -166,16 +166,21 @@ async function main() {
 
   console.log(`Fixture run: ${escalated.length} escalated, ${autoResolved.length} auto-resolved, ${stuck.length} awaiting Phase 7, ${sheetsRows.length} rows reaching Google Sheets.`);
 
-  const expectedIds = ["9999970", "9999975", "9999983", "24158082", "24157871", "24157473", "24157200", "24157609"];
-  for (const id of expectedIds) {
+  const expectedEscalateIds = ["9999970", "9999975", "9999983", "24158082", "24157871", "24157473", "24157200", "24157609"];
+  for (const id of expectedEscalateIds) {
     if (!escalated.some((e) => e.complaint_id === id)) failures.push(`Ticket ${id} did not reach Final: Escalate to Human Queue`);
+  }
+  const expectedAutoResolveIds = ["24157195", "24157240"];
+  for (const id of expectedAutoResolveIds) {
+    if (!autoResolved.some((e) => e.complaint_id === id)) failures.push(`Ticket ${id} did not reach Final: Auto-Resolve`);
   }
   if (stuck.length !== 0) failures.push(`Fixture tickets should never route to "Live Ticket (Awaiting Phase 7)", but ${stuck.length} did`);
 
-  // Two of the five newly-added real tickets (D/G) genuinely trip the
-  // real regulation-index search tool; three (E/F/H) genuinely don't --
-  // verify the tool ran and returned exactly what's documented, not a
-  // silently-stale or hand-typed value drifting from the real function.
+  // Exactly one of the five real "escalate" tickets added after A/B/C (D)
+  // genuinely trips the real regulation-index search tool; four (E/F/G/H)
+  // genuinely don't -- verify the tool ran and returned exactly what's
+  // documented, not a silently-stale or hand-typed value drifting from the
+  // real function.
   const dResult = escalated.find((e) => e.complaint_id === "24158082");
   if (!dResult || !dResult.agents.agent3.tool_result?.found) {
     failures.push("Ticket D (24158082) should have a real, found FDCPA §1692g(b) clause fetched by Agent 3's tool");

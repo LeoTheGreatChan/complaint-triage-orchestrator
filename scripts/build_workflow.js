@@ -213,9 +213,63 @@ const FIXTURE_TICKETS = [
       preferred_channel: "Web", servicemember_flag: true, special_population_flag: true,
     },
   },
+  // Tickets I-J: deliberately picked to close the OPPOSITE gap D-H opened --
+  // every fixture through H escalates (see README's ground-truth section on
+  // why that pattern isn't itself a bug). AUTO_RESOLVE has never once been
+  // reached by a real, hand-verified ticket, only a synthetic self-test
+  // placeholder. Picked from the same 25-ticket live batch specifically for
+  // being unremarkable: the single most common debt-collection sub-issue
+  // ("Debt is not yours" -- not on the HIGH_RISK_ISSUES list), no narrative,
+  // zero prior complaints, no special-population flag, no high-value-account
+  // signal. Same rigor as every other fixture -- real taxonomy tool, real
+  // regulation-index search (finds nothing, same honest reason as E/F/G/H) --
+  // just applied to a genuinely quiet ticket instead of a notable one.
+  {
+    complaint_id: "24157195",
+    product: "Debt collection",
+    sub_product: "I do not know",
+    issue: "Attempts to collect debt not owed",
+    sub_issue: "Debt is not yours",
+    company: "ProCollect, Inc.",
+    state: "NM",
+    tags: null,
+    date_received: "2026-07-14T00:04:51.000Z",
+    timely: "Yes",
+    company_response: "Closed with explanation",
+    complaint_what_happened: "",
+    crm: {
+      account_id: "SYN-TWYBB", linked_complaint_id: "24157195", customer_since: "2023-06-05",
+      tenure_years: 3, account_tier: "Preferred", product_holdings: ["Credit Card"],
+      outstanding_balance_usd: 0, prior_complaints_12mo: 0, prior_contacts_90d: 1,
+      preferred_channel: "Web", servicemember_flag: false, special_population_flag: false,
+    },
+  },
+  {
+    complaint_id: "24157240",
+    product: "Debt collection",
+    sub_product: "I do not know",
+    issue: "Attempts to collect debt not owed",
+    sub_issue: "Debt is not yours",
+    company: "Security Credit Services, LLC",
+    state: "NM",
+    tags: null,
+    date_received: "2026-07-14T00:06:48.000Z",
+    timely: "Yes",
+    company_response: "Closed with explanation",
+    complaint_what_happened: "",
+    crm: {
+      account_id: "SYN-D441JW", linked_complaint_id: "24157240", customer_since: "2025-10-14",
+      tenure_years: 1, account_tier: "Preferred", product_holdings: ["Checking Account"],
+      outstanding_balance_usd: 0, prior_complaints_12mo: 0, prior_contacts_90d: 0,
+      preferred_channel: "Phone", servicemember_flag: false, special_population_flag: false,
+    },
+  },
 ];
 
-const FIXTURE_IDS = ["9999970", "9999975", "9999983", "24158082", "24157871", "24157473", "24157200", "24157609"];
+const FIXTURE_IDS = ["9999970", "9999975", "9999983", "24158082", "24157871", "24157473", "24157200", "24157609", "24157195", "24157240"];
+// The subset expected to clear the escalation gate as AUTO_RESOLVE, not
+// ESCALATE_TO_HUMAN -- everything else in FIXTURE_IDS is expected to escalate.
+const AUTO_RESOLVE_IDS = ["24157195", "24157240"];
 
 const AGENT1_FIXTURES = {
   "9999970": { tool_used: false, output: { issue: "Written notification about debt", severity: "High", confidence: 0.88 } },
@@ -257,6 +311,12 @@ const AGENT1_FIXTURES = {
   // 0.78) specifically because there's nothing beyond the filed category to
   // substantiate it.
   "24157609": { tool_used: true, output: { issue: "Attempts to collect debt not owed", severity: "High", confidence: 0.6 } },
+  // I/J: real taxonomy tool confirms "Debt is not yours" is a real, common,
+  // non-high-risk sub-issue (not on HIGH_RISK_ISSUES) -- no narrative to
+  // reason from, but also nothing conflicting to flag. Low severity, high
+  // confidence, both defensible from the clean CRM alone.
+  "24157195": { tool_used: true, output: { issue: "Attempts to collect debt not owed", severity: "Low", confidence: 0.85 } },
+  "24157240": { tool_used: true, output: { issue: "Attempts to collect debt not owed", severity: "Low", confidence: 0.82 } },
 };
 
 const AGENT2_FIXTURES = {
@@ -311,6 +371,25 @@ const AGENT2_FIXTURES = {
       precedent_notes: "Real regulation-index search (issue + narrative only -- there is no narrative for this ticket) returned zero matches. CFPB's own filed sub-issue is 'Debt was result of identity theft', a real and serious label, but this build's regulation-search tool deliberately doesn't see sub-issue text (the same reasoning as the Ticket C taxonomy-sibling finding: trust the structured classification pipeline, not surface wording), so no citation is available to hand to Agent 3.",
     },
   },
+  // I: broader CRM-context lookup deliberately SKIPPED -- clean, unremarkable
+  // profile, nothing to look up further. First fixture to exercise this
+  // branch (Agent 2's discretionary tool), flagged as untested since Phase 3.
+  "24157195": {
+    broader_crm_lookup_used: false,
+    output: {
+      applicable_regulation: null, citation: null,
+      precedent_notes: "Real regulation-index search (issue + narrative -- there is no narrative) returned zero matches. A generic 'not my debt' dispute with a clean CRM (0 prior complaints, no special-population flag) doesn't warrant the discretionary broader-context lookup.",
+    },
+  },
+  // J: broader CRM-context lookup USED this time (discretionary, and taken)
+  // -- pairs with I to genuinely exercise both sides of that branch.
+  "24157240": {
+    broader_crm_lookup_used: true,
+    output: {
+      applicable_regulation: null, citation: null,
+      precedent_notes: "Real regulation-index search (issue + narrative -- there is no narrative) returned zero matches. Broader CRM context pulled given the dispute nature: tenure 1yr, single Checking Account holding, 0 prior complaints, 0 prior contacts in 90 days -- no pattern of repeat 'not mine' disputes or account friction.",
+    },
+  },
 };
 
 const AGENT3_FIXTURES = {
@@ -326,6 +405,11 @@ const AGENT3_FIXTURES = {
   "24157473": { tool_used: false, output: { draft: "Acknowledges the consumer's cited Massachusetts General Laws c. 140 §114C pro-rated fee-refund claim and the $400 annual fee at issue; recommends routing to a state-compliance specialist since no federal regulation in the cached index applies", cites_regulation: false } },
   "24157200": { tool_used: false, output: { draft: "Acknowledges the consumer's itemised list of missing FCRA adverse-action disclosures and commits to an internal compliance review of the credit-limit denial letter template", cites_regulation: false } },
   "24157609": { tool_used: false, output: { draft: "Acknowledges the account is disputed as resulting from identity theft per the consumer's own filed CFPB category, and requests supporting documentation (a police report or FTC identity-theft report) before proceeding", cites_regulation: false } },
+  // I/J: standard debt-validation-request acknowledgment -- no clause to
+  // cite (Agent 2 found none), and none needed for a routine "not mine"
+  // dispute this clean.
+  "24157195": { tool_used: false, output: { draft: "Sends the standard debt-validation request acknowledgment: confirms the dispute is logged, and requests the company either substantiate the debt with account-level proof or close the collection action", cites_regulation: false } },
+  "24157240": { tool_used: false, output: { draft: "Sends the standard debt-validation request acknowledgment: confirms the dispute is logged, and requests the company either substantiate the debt with account-level proof or close the collection action", cites_regulation: false } },
 };
 
 const AGENT4_FIXTURES = {
@@ -340,6 +424,12 @@ const AGENT4_FIXTURES = {
   "24157473": { tool_used: false, output: { confidence: 0.5, requires_human: true, reason: "Claim rests on a state statute outside the cached regulation corpus -- nothing to verify against this build's reference data, and state-law compliance questions warrant human review regardless" } },
   "24157200": { tool_used: false, output: { confidence: 0.48, requires_human: true, reason: "Consumer's claim cites a specific FCRA disclosure requirement this build's regulation corpus doesn't cover, and CRM shows 2 prior complaints in 12 months -- both independently warrant human review" } },
   "24157609": { tool_used: false, output: { confidence: 0.42, requires_human: true, reason: "CFPB's own filed sub-issue is 'Debt was result of identity theft' -- a serious, real government classification -- but there is no consumer narrative to substantiate it and Agent 2's regulation-search tool found no supporting citation; flagging for human review because the filed category and the available evidence are mismatched, not because either signal alone is routine" } },
+  // I/J: first two fixtures to clear the 0.7 confidence threshold. Both
+  // reasons name the absence of every risk signal this pipeline checks for,
+  // not just "looks fine" -- the same evidentiary standard as every escalate
+  // reason above, applied to a ticket where that standard is actually met.
+  "24157195": { tool_used: false, output: { confidence: 0.88, requires_human: false, reason: "Generic, high-volume dispute category ('Debt is not yours', not flagged high-risk); no narrative to conflict with, zero prior complaints, no special-population flag, no other CRM or narrative risk signal -- a standard acknowledgment response is appropriate without human review" } },
+  "24157240": { tool_used: false, output: { confidence: 0.85, requires_human: false, reason: "Generic, high-volume dispute category ('Debt is not yours', not flagged high-risk); broader CRM context shows no pattern of repeat disputes or account friction, zero prior complaints, no special-population flag -- a standard acknowledgment response is appropriate without human review" } },
 };
 
 // ===========================================================================
@@ -662,7 +752,10 @@ function selfTest() {
 
   for (const ticket of FIXTURE_TICKETS) {
     const result = runPipeline(ticket);
-    if (result.signals.escalate !== true) failures.push(`${ticket.complaint_id}: expected escalate=true, got ${result.signals.escalate}`);
+    const expectAutoResolve = AUTO_RESOLVE_IDS.includes(ticket.complaint_id);
+    if (result.signals.escalate === expectAutoResolve) {
+      failures.push(`${ticket.complaint_id}: expected escalate=${!expectAutoResolve}, got ${result.signals.escalate}`);
+    }
   }
 
   // Ticket C's taxonomy tool must confirm the sub-issue is real and that the
@@ -714,20 +807,23 @@ function selfTest() {
   );
   if (threatSignals.isHighRiskIssue !== true) failures.push("Positive control: a real taxonomy threat/harassment issue did not trigger isHighRiskIssue");
 
-  // Ground-truth comparison (Phase 5, spec Section 8): all three fixtures
-  // share company_response="Closed with explanation" + timely="Yes", which
-  // reads as "routine" under this proxy -- yet all three pipeline decisions
-  // are ESCALATE_TO_HUMAN. So agreement is expected to be FALSE for all
-  // three. This is not a bug: it's exactly why Section 8 insists this is
-  // reported as a directional signal, never accuracy -- CFPB's own outcome
-  // categories are coarser than the narrative-informed severity rubric that
-  // correctly flagged these as High. Asserted explicitly so a future change
-  // that silently "fixes" this into agreement=true gets caught, not
-  // celebrated.
+  // Ground-truth comparison (Phase 5, spec Section 8): every fixture reads
+  // "routine" under this proxy (all share company_response variants CFPB
+  // itself doesn't flag as elevated, + timely). The escalating majority
+  // disagrees with that routine reading (not a bug -- exactly why Section 8
+  // insists this is reported as a directional signal, never accuracy: CFPB's
+  // own outcome categories are coarser than the narrative-informed severity
+  // rubric). Tickets I/J are the one pair where the pipeline's own decision
+  // (AUTO_RESOLVE) actually lines up with that routine reading -- asserted
+  // explicitly, in both directions, so a future change that silently flips
+  // either group gets caught, not celebrated.
   for (const ticket of FIXTURE_TICKETS) {
     const result = runPipeline(ticket);
+    const expectAutoResolve = AUTO_RESOLVE_IDS.includes(ticket.complaint_id);
     if (result.ground_truth.ground_truth_signal !== "routine") failures.push(`${ticket.complaint_id}: expected ground_truth_signal="routine" (Closed with explanation + timely), got "${result.ground_truth.ground_truth_signal}"`);
-    if (result.ground_truth.agrees_with_ground_truth !== false) failures.push(`${ticket.complaint_id}: expected agrees_with_ground_truth=false (escalated against a routine-reading outcome) -- got true; if this changed, confirm it's a real fix and not a proxy regression`);
+    if (result.ground_truth.agrees_with_ground_truth !== expectAutoResolve) {
+      failures.push(`${ticket.complaint_id}: expected agrees_with_ground_truth=${expectAutoResolve} -- got ${result.ground_truth.agrees_with_ground_truth}; if this changed, confirm it's a real fix/finding and not a proxy regression`);
+    }
   }
 
   // Positive control: a company missing CFPB's 15-day timely-response
@@ -804,7 +900,8 @@ function selfTest() {
     console.error("SELF-TEST FAILED:\n" + failures.map((f) => `  - ${f}`).join("\n"));
     process.exit(1);
   }
-  console.log(`Self-test passed: ${FIXTURE_TICKETS.length}/${FIXTURE_TICKETS.length} fixtures escalate as expected, negative control holds, taxonomy discrepancy correctly reflected, ground-truth proxy behaves as documented, Sheets row flattening handles both decision shapes.`);
+  const escalateCount = FIXTURE_TICKETS.length - AUTO_RESOLVE_IDS.length;
+  console.log(`Self-test passed: ${escalateCount}/${FIXTURE_TICKETS.length} fixtures escalate and ${AUTO_RESOLVE_IDS.length}/${FIXTURE_TICKETS.length} auto-resolve as expected, negative control holds, taxonomy discrepancy correctly reflected, ground-truth proxy behaves as documented, Sheets row flattening handles both decision shapes.`);
 }
 
 selfTest();

@@ -73,6 +73,31 @@ bug: `computeGroundTruthAgreement`'s `/monetary relief/i` regex misread CFPB's d
 there) — fixed with a negative lookbehind once ticket 24157609 exercised that response
 value for the first time.
 
+**Two more (Tickets I/J) were added specifically to close the opposite gap: every
+fixture through H escalates.** That pattern held up under scrutiny — deliberately
+severe original fixtures (A/B/C) plus five tickets picked for having a narrative or a
+notable category (D-H) both skew away from routine — but it also meant `AUTO_RESOLVE`
+had never once been reached by a real, hand-verified ticket, only a synthetic
+self-test placeholder. Tickets I/J (24157195, 24157240) were picked from the *rest* of
+the original 25-ticket batch specifically for being unremarkable: the single most
+common debt-collection sub-issue ("Debt is not yours"), no narrative, zero prior
+complaints, no special-population flag, nothing that trips any of the six real
+escalation signals. Same hand-verification rigor as every other fixture, just applied
+to a quiet ticket instead of a notable one — and it holds: both genuinely clear Agent
+4's 0.7 confidence threshold with no other signal firing, so `computeEscalationSignals`
+returns `escalate: false` for real, not by construction. `FIXTURE_TICKETS` now holds 10
+tickets (8 escalate, 2 auto-resolve); `awaiting_records` dropped to 18. This is also the
+first time `agrees_with_ground_truth` reads `true` anywhere in the fixture set — I/J's
+routine ground-truth reading actually lines up with the pipeline's own routine
+decision, closing out the self-test's ground-truth loop in both directions.
+
+Hitting exactly 10 records also caught a second small bug: the "N ticket(s) processed
+to date" honesty banner was gated on `len(records) < 10`, so it silently disappeared
+the moment `records` reached 10 -- an accidental boundary, not a deliberate "the sample
+is big enough now" decision. Bumped to `< 50` so it doesn't flicker off at round
+numbers; caught by loading the app in a browser after this batch, not by the code
+compiling.
+
 ## KPIs: what's real, what's honestly deferred
 
 Of Section 9's five metrics, three are computed directly from the pipeline log
@@ -80,14 +105,18 @@ Of Section 9's five metrics, three are computed directly from the pipeline log
 Phase 7" instead of a number (Hours saved/ticket, SLA compliance) — both require a
 real, timed production run to measure honestly, which doesn't exist yet, only manual
 test-harness executions. See each `kpi_*` function in `app.py` for the exact
-computation and reasoning. Escalation agreement in particular is expected to read `0%`
-here — see the ground-truth section of the main README before treating that as a bug.
+computation and reasoning. Escalation agreement reads `20%` (2/10) as of this build,
+not because the pipeline is graded against CFPB's coarse label and mostly fails it —
+see the ground-truth section of the main README before treating that number itself as
+meaningful beyond "directional."
 
 ## Queue view: escalated vs. auto-resolved
 
 A `st.segmented_control` ("Escalated to human" / "Auto-resolved") right below the
 decision-breakdown chart switches which table renders underneath — `render_queue_table`
-or the newer `render_auto_resolved_table`. Defaults to the escalated queue.
+or `render_auto_resolved_table`. Defaults to the escalated queue. As of Tickets I/J
+(above), the auto-resolved queue genuinely renders two real rows instead of always
+showing its empty state.
 
 **What was tried first and dropped:** click-a-bar-to-filter, using
 `st.plotly_chart(..., on_select="rerun", selection_mode="points")`. This never worked
@@ -102,11 +131,11 @@ want to take another run at the chart-click version, the removed code (and the d
 `st.write(chart_state)` that showed empty selections) is in the git history around this
 commit.
 
-`render_auto_resolved_table` currently always renders its "no auto-resolved tickets
-yet" empty state, since none of the 8 real fixtures auto-resolve (same expected
-imbalance as the KPIs) — verified against a temporary 1-escalate/1-auto-resolve test
-fixture swapped into `pipeline_log.json` and back, not against real data, since no real
-data with that shape exists yet.
+`render_auto_resolved_table` now genuinely renders two real rows (Tickets I/J above)
+instead of its "no auto-resolved tickets yet" empty state. Originally verified only
+against a temporary 1-escalate/1-auto-resolve test fixture swapped into
+`pipeline_log.json` and back, since no real data with that shape existed yet; that gap
+is now closed with real, hand-verified tickets.
 
 ## Before a production / client-facing launch
 
