@@ -44,6 +44,35 @@ test-harness executions. See each `kpi_*` function in `app.py` for the exact
 computation and reasoning. Escalation agreement in particular is expected to read `0%`
 here — see the ground-truth section of the main README before treating that as a bug.
 
+## Before a production / client-facing launch
+
+Right now the UI cites the spec directly in a few places — `"(spec Section 8)"`,
+`"spec Phase 3"`, `"Section 6 fixture tickets"`, `"(spec Section 14)"`, `"(spec Section
+3c)"` — deliberately, since during development that's the fastest way to trace an
+on-screen claim back to the exact requirement it satisfies. **A real user has no reason
+to know what "spec Section 8" means and it'll just read as unfinished or confusing.**
+Find every instance with:
+
+```bash
+grep -n "spec Section\|spec Phase\|Section 6 fixture" dashboard/app.py
+```
+
+(Comments and docstrings can keep the references — they're for developers, not
+end users. Only the strings actually inside `st.markdown`/`md_html`/`render_kpi_card`
+calls need rewriting.) As of this build, the user-visible occurrences are:
+
+- The escalation-agreement KPI's sub-label ("...directional signal, not accuracy
+  (Section 8)")
+- The "3 ticket(s) processed to date" note under the KPI row ("spec Phase 3", "Section
+  6 fixture tickets")
+- The Technical detail tab's caption ("(spec Section 10)")
+- The "Other required disclosures (spec Section 14)" expander title
+- The disclosure banner's text ("(spec Section 3c)")
+
+Rewrite each in plain language that stands on its own (e.g. "directional signal, not a
+certified accuracy score" instead of "(Section 8)") before this dashboard is shown to
+anyone who isn't reading the spec alongside it.
+
 ## Swapping in a live Google Sheets read later
 
 `app.py`'s only coupling to the local-file data source is `load_pipeline_log()`.
