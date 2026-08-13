@@ -56,6 +56,17 @@ WHITE = "#FFFFFF"
 # "avoid bright colours," so chart series are navy-family, not a rainbow.
 CHART_SERIES = [NAVY, "#3D6FB3", "#7FA3D1", SLATE, "#94A3B8"]
 
+# Agent roles (spec Section 6) -- referenced both in chart labels (so a bar
+# or bar-group is self-explanatory without hovering) and in the persistent
+# legend rendered at the top of the Technical detail tab (so it doesn't
+# depend on a viewer noticing the chart labels at all).
+AGENT_INFO = {
+    1: {"name": "Classification", "tool": "Regulatory taxonomy lookup", "used_when": "Only when the narrative is ambiguous relative to the filed category"},
+    2: {"name": "Research", "tool": "Synthetic CRM lookup + regulation-text lookup", "used_when": "Regulation lookup always; special-population check always; broader CRM context only when relevant"},
+    3: {"name": "Drafting", "tool": "Exact regulation clause fetch", "used_when": "Only when citing a specific provision"},
+    4: {"name": "QA / escalation-scoring", "tool": "Re-verify a cited clause or CRM fact", "used_when": "Only when the draft makes a checkable claim"},
+}
+
 DATA_PATH = Path(__file__).resolve().parent / "data" / "pipeline_log.json"
 
 st.set_page_config(page_title="Complaint Triage Orchestrator", layout="wide", page_icon=None)
@@ -179,6 +190,46 @@ def inject_brand_css():
             color: {SLATE};
             margin-top: -0.5rem;
             margin-bottom: 1rem;
+        }}
+
+        /* Agent legend -- persistent reference for what "Agent 1/2/3/4" mean. */
+        .agent-legend {{
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }}
+        .agent-card {{
+            background: {WHITE};
+            border: 1px solid {LIGHT_GREY};
+            border-left: 3px solid {NAVY};
+            border-radius: 6px;
+            padding: 0.75rem 0.9rem;
+        }}
+        .agent-card-num {{
+            font-family: 'Manrope', sans-serif;
+            font-weight: 600;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: {SLATE};
+        }}
+        .agent-card-name {{
+            font-family: 'Manrope', sans-serif;
+            font-weight: 700;
+            font-size: 1rem;
+            color: {NAVY};
+            margin: 0.15rem 0 0.4rem 0;
+        }}
+        .agent-card-tool {{
+            font-size: 0.78rem;
+            color: {SLATE};
+            margin-bottom: 0.3rem;
+        }}
+        .agent-card-when {{
+            font-size: 0.74rem;
+            color: {SLATE};
+            font-style: italic;
         }}
         </style>
         """
@@ -340,7 +391,8 @@ def chart_category_breakdown(records):
 def chart_confidence_distribution(records):
     fig = go.Figure()
     for i, agent_key in enumerate(["agent1", "agent4"]):
-        label = "Agent 1 (Classification)" if agent_key == "agent1" else "Agent 4 (QA/scoring)"
+        agent_num = 1 if agent_key == "agent1" else 4
+        label = f"Agent {agent_num} ({AGENT_INFO[agent_num]['name']})"
         values, labels = [], []
         for r in records:
             out = r["agents"][agent_key]["output"] or {}
@@ -362,11 +414,11 @@ def chart_confidence_distribution(records):
 
 def chart_tool_use_frequency(records):
     tool_labels = {
-        "agent1": "Agent 1: taxonomy lookup",
-        "agent2_regulation": "Agent 2: regulation index (always)",
-        "agent2_crm": "Agent 2: broader CRM lookup",
-        "agent3": "Agent 3: exact clause fetch",
-        "agent4": "Agent 4: re-verify",
+        "agent1": f"Agent 1 ({AGENT_INFO[1]['name']}): taxonomy lookup",
+        "agent2_regulation": f"Agent 2 ({AGENT_INFO[2]['name']}): regulation index (always)",
+        "agent2_crm": f"Agent 2 ({AGENT_INFO[2]['name']}): broader CRM lookup",
+        "agent3": f"Agent 3 ({AGENT_INFO[3]['name']}): exact clause fetch",
+        "agent4": f"Agent 4 ({AGENT_INFO[4]['name']}): re-verify",
     }
     counts = {k: 0 for k in tool_labels}
     for r in records:
@@ -391,7 +443,7 @@ def chart_tool_use_frequency(records):
             textposition="outside",
         )
     )
-    fig.update_layout(xaxis=dict(range=[0, n + 0.5], dtick=1), margin=dict(l=190))
+    fig.update_layout(xaxis=dict(range=[0, n + 0.5], dtick=1), margin=dict(l=270))
     return plotly_brand_layout(fig, "Tool-use frequency (of tickets processed)")
 
 
@@ -436,6 +488,27 @@ def render_queue_table(records):
         </table>
         """
     )
+
+
+# ---------------------------------------------------------------------------
+# Agent legend -- what "Agent 1/2/3/4" mean, spec Section 6. Rendered as a
+# persistent reference at the top of the Technical detail tab rather than
+# relying on chart hover text, which a viewer has no reason to discover on
+# their own.
+# ---------------------------------------------------------------------------
+def render_agent_legend():
+    cards = "".join(
+        f"""
+        <div class="agent-card">
+            <div class="agent-card-num">Agent {num}</div>
+            <div class="agent-card-name">{info['name']}</div>
+            <div class="agent-card-tool">Tool: {info['tool']}</div>
+            <div class="agent-card-when">{info['used_when']}</div>
+        </div>
+        """
+        for num, info in AGENT_INFO.items()
+    )
+    md_html(f'<div class="agent-legend">{cards}</div>')
 
 
 # ---------------------------------------------------------------------------
@@ -503,6 +576,7 @@ def main():
             "(spec Section 10).</p>",
             unsafe_allow_html=True,
         )
+        render_agent_legend()
         left, right = st.columns(2)
         with left:
             st.plotly_chart(chart_confidence_distribution(records), width='stretch')
