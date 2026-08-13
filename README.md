@@ -531,27 +531,38 @@ is the actual dedup mechanism: a re-processed `complaint_id` — which the date-
 watermark overlap flagged since Phase 1 makes a real, expected occurrence, not an edge
 case — updates its existing Sheets row instead of appending a duplicate.
 
-**This is the one part of the workflow that is still genuinely untested.** Every
-Code/IF node has now been verified three ways: the generator's self-test,
-`scripts/simulate_workflow.mjs` executing the real committed JSON, and — new — a real
-local n8n instance actually importing and running it (see "How to run" above). But that
-real-n8n pass didn't touch this node: there's no Google credentials configured in that
-local instance, so it's never made an actual Google Sheets API call. What *is* verified:
-the simulator treats the Sheets node as a terminal that records what would be written,
-and confirms every processed ticket reaches it with `complaint_id` present and every
-field flattened to a primitive (no nested objects a real Sheets cell can't hold). What
-is **not** verified: that the `googleSheets` node's parameter schema is exactly right
-for a current n8n version, or that the Append-or-Update operation actually dedups the
-way described. `documentId`, `sheetName`, and `credentials` are all placeholder values —
-replace them with your own spreadsheet ID and Google Sheets OAuth2 credential before
-running this, and treat the whole node as needing a real run check with real
-credentials, not just a code review.
+**Now genuinely verified end-to-end, with real credentials, against the real Google
+Sheets API — the last untested part of the whole workflow.** Every Code/IF node had
+already been verified three ways (generator self-test, `scripts/simulate_workflow.mjs`
+against the real committed JSON, and a real local n8n import — see "How to run"); this
+closes the fourth. Real steps taken: attached a real Google Sheets OAuth2 credential to
+the node in the local n8n instance, pointed `documentId`/`sheetName` at a real
+spreadsheet ("Complaint Triage Orchestrator - Pipeline Log") via n8n's "From list"
+picker, ran `Load Fixture Tickets` → ... → `Prepare Row for Google Sheets` →
+`Google Sheets: Log Decision` for real, and confirmed via a direct read of the live
+spreadsheet that two new real rows landed with the correct flattened data. Re-ran the
+identical write a second time and confirmed the sheet still held exactly the same five
+data rows — no duplicate appended — genuinely verifying the Append-or-Update dedup
+mechanism, not just that the node reported success.
+
+**One real, non-obvious gotcha found and fixed along the way:** picking the document
+and sheet via n8n's "From list" resolver (needed once real credentials replaced the
+`REPLACE_WITH_...` placeholders) silently reset `Mapping Column Mode` from this build's
+`autoMapInputData` to `defineBelow` ("Map Each Column Manually") — n8n's own UI behavior
+when a sheet's columns are freshly fetched, not something the committed JSON caused. In
+that mode, every one of the ~30 output columns is an empty manually-typed field, so a
+run would have silently written blank rows despite reporting success. Fixed by manually
+switching `Mapping Column Mode` back to "Map Automatically" in the n8n UI (matching the
+generator's `autoMapInputData` setting) rather than hand-retyping thirty expressions —
+worth checking for on any fresh import that touches this node's document/sheet picker.
+`documentId`, `sheetName`, and `credentials` in the committed JSON remain the
+`REPLACE_WITH_...` placeholders deliberately — the real values live only in the local
+n8n instance's own configuration, never committed.
 
 ## Not yet built (Phase 7)
 
-The mock-to-real Claude API swap itself — deliberately held back for now to keep real
-API cost at zero until everything else is finalized. Also awaiting Phase 7: a real,
-live-tested confirmation that the Google Sheets storage/dedup node above actually works
-with real credentials (see "Storage and dedup"). The dashboard's aggregate "% agreement"
-figure is real but thin (n=10) until a real pilot run accumulates more tickets through
-Phase 7's real agents.
+The mock-to-real Claude API swap — the last deliberately-held-back piece, to keep real
+API cost at zero until everything else is finalized. Every other phase's verification
+checklist item (real n8n import, real end-to-end execution, real Google Sheets write and
+dedup) is now closed. The dashboard's aggregate "% agreement" figure is real but thin
+(n=10) until a real pilot run accumulates more tickets through Phase 7's real agents.
