@@ -235,6 +235,78 @@ def inject_brand_css():
             color: {SLATE};
             font-style: italic;
         }}
+
+        /* Queue card: the segmented control re-skinned as tabs attached
+           directly to its table, not a separate widget floating above it
+           (spec-adjacent UX fix -- Streamlit's default segmented_control is
+           a standalone pill-button group with no way to visually attach it
+           to what it controls). One bordered white card holds the tab
+           strip and the table; the active tab's white background matches
+           the card body below it so it reads as "open," while the inactive
+           tab sits on the strip's grey background and looks receded. */
+        .st-key-queue_card {{
+            background: {WHITE};
+            border: 1px solid {LIGHT_GREY};
+            border-radius: 8px;
+            overflow: hidden;
+        }}
+        .st-key-queue_card .stElementContainer {{ margin-bottom: 0 !important; }}
+        /* The segmented_control's own element-container ships with an
+           inline shrink-to-fit width (its content's natural size, e.g.
+           ~220px) rather than stretching to the card -- override so the
+           tab strip actually spans full width instead of sitting stranded
+           in the top-left corner. */
+        .st-key-queue_card .st-key-queue_view {{ width: 100% !important; }}
+        .st-key-queue_card [data-testid="stButtonGroup"] {{
+            display: flex;
+            width: 100%;
+            background: {BACKGROUND};
+            border-bottom: 1px solid {LIGHT_GREY};
+        }}
+        /* Both buttons actually share ONE wrapper div (not one each) as the
+           real flex child of stButtonGroup -- and that wrapper ships with
+           Streamlit's own `max-width: fit-content`, which caps it at its
+           content's natural size and defeats flex-grow before it can do
+           anything. Override the cap, then let the buttons (real flex
+           items of THIS wrapper) split its width evenly. */
+        .st-key-queue_card [data-testid="stButtonGroup"] > div {{
+            flex: 1 1 0;
+            max-width: none !important;
+            width: 100%;
+        }}
+        .st-key-queue_card [data-testid^="stBaseButton-segmented_control"] {{
+            flex: 1 1 0;
+            min-width: 0;
+            border: none !important;
+            border-radius: 0 !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            color: {SLATE} !important;
+            font-family: 'Manrope', sans-serif !important;
+            font-weight: 600 !important;
+            font-size: 0.85rem !important;
+            padding: 0.75rem 0.4rem !important;
+            margin: 0 !important;
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+        }}
+        .st-key-queue_card [data-testid^="stBaseButton-segmented_control"] * {{
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+            text-align: center !important;
+        }}
+        .st-key-queue_card [data-testid="stBaseButton-segmented_controlActive"] {{
+            background: {WHITE} !important;
+            color: {NAVY} !important;
+            box-shadow: inset 0 -3px 0 0 {NAVY} !important;
+        }}
+        .st-key-queue_card .stElementContainer:not(:has([data-testid="stButtonGroup"])) {{
+            padding: 0.9rem 1.25rem 1.25rem;
+        }}
+        .st-key-queue_card .queue-table {{ margin: 0; }}
+        .st-key-queue_card h4:first-child {{ margin-top: 0; }}
         </style>
         """
     )
@@ -456,8 +528,9 @@ def chart_tool_use_frequency(records):
 # ---------------------------------------------------------------------------
 def render_queue_table(records):
     escalated = [r for r in records if r["decision"] == "ESCALATE_TO_HUMAN"]
+    heading = "#### Queue: drafts awaiting human review"
     if not escalated:
-        st.markdown('<p class="section-caption">No tickets currently awaiting human review.</p>', unsafe_allow_html=True)
+        md_html(f'{heading}\n<p class="section-caption">No tickets currently awaiting human review.</p>')
         return
 
     rows = []
@@ -481,6 +554,7 @@ def render_queue_table(records):
 
     md_html(
         f"""
+        {heading}
         <table class="queue-table">
             <thead>
                 <tr>
@@ -496,12 +570,14 @@ def render_queue_table(records):
 
 def render_auto_resolved_table(records):
     auto_resolved = [r for r in records if r["decision"] == "AUTO_RESOLVE"]
+    heading = "#### Queue: auto-resolved tickets"
     if not auto_resolved:
-        st.markdown(
-            '<p class="section-caption">No tickets have auto-resolved yet in this log — all 3 fixtures '
-            "escalate (see the ground-truth section of the main README for why that's expected, not a "
-            "bug). This table renders correctly once a real record has decision=AUTO_RESOLVE.</p>",
-            unsafe_allow_html=True,
+        md_html(
+            f"""
+            {heading}
+            <p class="section-caption">No tickets have auto-resolved in this log yet. This table renders
+            correctly once a real record has decision=AUTO_RESOLVE.</p>
+            """
         )
         return
 
@@ -525,6 +601,7 @@ def render_auto_resolved_table(records):
 
     md_html(
         f"""
+        {heading}
         <table class="queue-table">
             <thead>
                 <tr>
@@ -641,6 +718,12 @@ def main():
         if requested_view in ("Escalated to human", "Auto-resolved"):
             st.session_state["queue_view"] = requested_view
             scroll_to_queue = True
+        else:
+            # Same value segmented_control's own `default` would have used --
+            # set directly instead of passing `default=` alongside a keyed
+            # widget that Session State already governs, which Streamlit
+            # warns is a conflicting/undefined combination.
+            st.session_state["queue_view"] = "Escalated to human"
 
     tab_overview, tab_technical = st.tabs(["Overview", "Technical detail"])
 
@@ -726,6 +809,10 @@ def main():
             # browser tries to jump to #queue-section on initial page load,
             # before Streamlit has finished rendering that element, so the
             # native jump silently misses. This polls for it instead.
+            #
+            # Streamlit nudges toward st.iframe as the replacement here, but
+            # that only takes a `src` URL, not raw HTML/JS content -- not a
+            # substitute for what this actually needs.
             components.html(
                 """
                 <script>
@@ -745,16 +832,15 @@ def main():
                 """,
                 height=0,
             )
-        queue_view = st.segmented_control(
-            "Queue view", ["Escalated to human", "Auto-resolved"],
-            default="Escalated to human", key="queue_view", label_visibility="collapsed",
-        )
-        if queue_view == "Auto-resolved":
-            st.markdown("#### Queue: auto-resolved tickets")
-            render_auto_resolved_table(records)
-        else:
-            st.markdown("#### Queue: drafts awaiting human review")
-            render_queue_table(records)
+        with st.container(key="queue_card"):
+            queue_view = st.segmented_control(
+                "Queue view", ["Escalated to human", "Auto-resolved"],
+                key="queue_view", label_visibility="collapsed",
+            )
+            if queue_view == "Auto-resolved":
+                render_auto_resolved_table(records)
+            else:
+                render_queue_table(records)
 
     with tab_technical:
         st.markdown(

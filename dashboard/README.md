@@ -112,11 +112,29 @@ meaningful beyond "directional."
 
 ## Queue view: escalated vs. auto-resolved
 
-A `st.segmented_control` ("Escalated to human" / "Auto-resolved") right below the
-decision-breakdown chart switches which table renders underneath — `render_queue_table`
-or `render_auto_resolved_table`. Defaults to the escalated queue. As of Tickets I/J
-(above), the auto-resolved queue genuinely renders two real rows instead of always
-showing its empty state.
+A `st.segmented_control` ("Escalated to human" / "Auto-resolved") switches which table
+renders underneath — `render_queue_table` or `render_auto_resolved_table`. Defaults to
+the escalated queue. As of Tickets I/J (above), the auto-resolved queue genuinely
+renders two real rows instead of always showing its empty state.
+
+**Re-skinned as tabs attached to the table, not a separate button group floating above
+it.** The default `st.segmented_control` reads as two standalone pill buttons with a
+visible gap before the table — raised as feedback since it doesn't look connected to
+what it controls. Both now live inside one bordered white card
+(`st.container(key="queue_card")`): the tab strip sits flush at the top on a light-grey
+background, the active tab's background matches the white card body below it (so it
+reads as "open"), with a navy underline for a second cue. Getting there took three real
+CSS fixes against Streamlit's actual rendered DOM (inspected live, not guessed):
+1. The segmented control's own element-container ships with an inline shrink-to-fit
+   width rather than stretching to its parent — overridden via `.st-key-queue_view {
+   width: 100% !important }`.
+2. Both buttons share ONE wrapper div (not one each) as the real flex child of the
+   button group, and that wrapper ships with `max-width: fit-content`, which caps it at
+   its own content size and defeats `flex-grow` before it can do anything — overridden
+   with `max-width: none`.
+3. The button text has `white-space: nowrap; text-overflow: ellipsis` by default, which
+   truncated "Escalated to human" once the tabs were forced to split width evenly —
+   overridden to allow wrapping.
 
 **Clicking a bar in the "Escalate vs. auto-resolve" chart jumps straight to its table**
 — re-verified live twice before landing on this design:
