@@ -118,18 +118,42 @@ or `render_auto_resolved_table`. Defaults to the escalated queue. As of Tickets 
 (above), the auto-resolved queue genuinely renders two real rows instead of always
 showing its empty state.
 
-**What was tried first and dropped:** click-a-bar-to-filter, using
-`st.plotly_chart(..., on_select="rerun", selection_mode="points")`. This never worked
-in testing — neither a plain click nor a box-select drag ever produced a non-empty
-`chart_state.selection.points`, tried with and without `clickmode="event+select"` and
-`dragmode="select"` set explicitly on the figure. Bar-trace click-selection is known to
-be finicky in Plotly.js, and there's no confidence this would reliably fire for a real
-user's mouse either, automation or not. Rather than ship an interaction that might
-silently do nothing, it was replaced with the segmented control — same practical
-outcome (choose which queue to look at), a widget that's guaranteed to work. If you
-want to take another run at the chart-click version, the removed code (and the debug
-`st.write(chart_state)` that showed empty selections) is in the git history around this
-commit.
+**Clicking a bar in the "Escalate vs. auto-resolve" chart jumps straight to its table**
+— re-verified live twice before landing on this design:
+
+1. *First attempt, dropped:* click-a-bar-to-filter via
+   `st.plotly_chart(..., on_select="rerun", selection_mode="points")`. Never worked
+   reliably in testing — neither a plain click nor a box-select drag ever produced a
+   non-empty `chart_state.selection.points`, tried with and without
+   `clickmode="event+select"` / `dragmode="select"`. Replaced with the segmented control
+   above as a guaranteed-to-work fallback.
+2. *Re-investigated later* (a user request specifically asked for "click bar -> jump to
+   table"): re-tested the same on_select approach live with real clicks and current
+   library versions. Found it *flaky*, not cleanly broken — a click sometimes registered
+   a real selection point, but one click behind (only visible on the *next* rerun), and
+   a click on the other bar sometimes left the state completely unchanged. That's worse
+   than a clean failure: it would look like it works, then silently doesn't. Confirmed
+   the original call to drop it was correct, not just untried.
+3. *What's shipped instead:* two invisible `<a href="?queue_view=...#queue-section">`
+   links absolutely-positioned over each bar (`decision_chart_wrap`, a keyed
+   `st.container()` for CSS scoping), each pointing at a real URL query param + anchor
+   — a genuine browser navigation, not a Streamlit rerun event, so it doesn't depend on
+   the flaky Python-JS selection bridge at all. `main()` seeds
+   `st.session_state["queue_view"]` from `st.query_params` before the segmented control
+   instantiates, so a bar click and a manual toggle click drive the exact same state.
+   Positioning them took a real CSS debugging pass: Streamlit wraps every element
+   (including the overlay's own `st.markdown` call) in its own `position: relative,
+   height: 0` container, which becomes the nearest positioned ancestor and steals the
+   containing-block role before the overlay's `top`/`bottom` percentages can resolve
+   against the intended wrapper — fixed with a `.stElementContainer { position: static }`
+   override scoped to `decision_chart_wrap`. The anchor jump itself needed a second fix:
+   the browser tries to scroll to `#queue-section` before Streamlit has finished
+   rendering that element, so the native jump silently misses — a small
+   `components.v1.html` snippet (the one place Streamlit actually executes injected
+   `<script>` tags, since `st.markdown(unsafe_allow_html=True)` sets HTML via
+   `innerHTML` and doesn't run scripts) polls for the element and calls
+   `scrollIntoView()` once it exists, gated to fire only right after a query-param
+   navigation, not on every rerun.
 
 `render_auto_resolved_table` now genuinely renders two real rows (Tickets I/J above)
 instead of its "no auto-resolved tickets yet" empty state. Originally verified only

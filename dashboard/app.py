@@ -25,6 +25,7 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 def md_html(s: str):
@@ -628,6 +629,19 @@ def main():
     records = log["records"]
     awaiting_records = log.get("awaiting_records", [])
 
+    # Seeds the queue-view toggle from a `?queue_view=...` URL query param --
+    # must happen before st.segmented_control(key="queue_view") instantiates
+    # below, since a keyed widget's session_state entry, once set, wins over
+    # `default` on every later rerun. Only applied once per session (real
+    # navigations from the bar-jump links below create a fresh session
+    # anyway); a manual toggle click after that always takes priority.
+    scroll_to_queue = False
+    if "queue_view" not in st.session_state:
+        requested_view = st.query_params.get("queue_view")
+        if requested_view in ("Escalated to human", "Auto-resolved"):
+            st.session_state["queue_view"] = requested_view
+            scroll_to_queue = True
+
     tab_overview, tab_technical = st.tabs(["Overview", "Technical detail"])
 
     with tab_overview:
@@ -658,18 +672,79 @@ def main():
         st.markdown("<br>", unsafe_allow_html=True)
         left, right = st.columns(2)
         with left:
-            st.plotly_chart(chart_decision_breakdown(records), width='stretch')
+            # A Plotly bar-click -> table-jump interaction was tried first via
+            # st.plotly_chart(..., on_select="rerun") and dropped after it
+            # proved flaky under real clicks (re-verified live: sometimes a
+            # click's selection state didn't land until the NEXT click,
+            # sometimes it silently reset to empty -- inconsistent is worse
+            # than a clean failure, and the flakiness is in Streamlit's
+            # Python-JS selection bridge, not Plotly's own rendering.
+            # A plain HTML <a href="?queue_view=...#queue-section"> overlay,
+            # positioned over each bar with a keyed st.container for CSS
+            # scoping, sidesteps that bridge entirely -- it's a real browser
+            # navigation with a query param + anchor, not a Streamlit rerun
+            # event. `main()` seeds st.session_state["queue_view"] from
+            # st.query_params before the segmented_control below is
+            # instantiated, so this and the manual toggle both drive the same
+            # single source of truth.
+            with st.container(key="decision_chart_wrap"):
+                st.plotly_chart(chart_decision_breakdown(records), width='stretch')
+                st.markdown(
+                    """
+                    <style>
+                    .st-key-decision_chart_wrap { position: relative; }
+                    /* Streamlit wraps every element (including this markdown
+                       call) in its own position:relative, height:0 container
+                       -- that becomes the nearest positioned ancestor and
+                       steals the containing-block role before top/bottom %
+                       can resolve against the wrapper above. Neutralize it. */
+                    .st-key-decision_chart_wrap .stElementContainer { position: static; }
+                    .st-key-decision_chart_wrap .bar-jump-link {
+                        position: absolute; top: 14%; bottom: 10%;
+                        border-radius: 6px; cursor: pointer;
+                    }
+                    .st-key-decision_chart_wrap .bar-jump-link:hover { background: rgba(21, 62, 117, 0.08); }
+                    .st-key-decision_chart_wrap .bar-jump-left { left: 2%; width: 44%; }
+                    .st-key-decision_chart_wrap .bar-jump-right { right: 2%; width: 44%; }
+                    </style>
+                    <a class="bar-jump-link bar-jump-left" title="Jump to: drafts awaiting human review"
+                       href="?queue_view=Escalated+to+human#queue-section"></a>
+                    <a class="bar-jump-link bar-jump-right" title="Jump to: auto-resolved tickets"
+                       href="?queue_view=Auto-resolved#queue-section"></a>
+                    """,
+                    unsafe_allow_html=True,
+                )
         with right:
             st.plotly_chart(chart_category_breakdown(records), width='stretch')
 
-        # A Plotly bar-click -> table-filter interaction was tried first (spec
-        # intent: "click a bar, see its table") and dropped after it couldn't
-        # be made to work reliably -- neither a plain click nor a box-select
-        # drag ever produced a non-empty chart_state.selection.points, tried
-        # with and without explicit clickmode/dragmode. Rather than ship an
-        # interaction that might not fire for a real user either,
-        # st.segmented_control gives the same practical outcome (choose which
-        # queue to view) through a widget that's actually guaranteed to work.
+        st.markdown('<div id="queue-section"></div>', unsafe_allow_html=True)
+        if scroll_to_queue:
+            # st.markdown-injected <script> tags don't execute in Streamlit
+            # (HTML is set via innerHTML, not parsed as live markup) --
+            # components.v1.html runs in a real iframe, where they do. The
+            # anchor in the bar-jump links' href can't do this alone: the
+            # browser tries to jump to #queue-section on initial page load,
+            # before Streamlit has finished rendering that element, so the
+            # native jump silently misses. This polls for it instead.
+            components.html(
+                """
+                <script>
+                (function () {
+                    let tries = 0;
+                    const tryScroll = () => {
+                        const el = window.parent.document.getElementById("queue-section");
+                        if (el) {
+                            el.scrollIntoView({behavior: "smooth", block: "start"});
+                        } else if (tries++ < 30) {
+                            setTimeout(tryScroll, 100);
+                        }
+                    };
+                    tryScroll();
+                })();
+                </script>
+                """,
+                height=0,
+            )
         queue_view = st.segmented_control(
             "Queue view", ["Escalated to human", "Auto-resolved"],
             default="Escalated to human", key="queue_view", label_visibility="collapsed",
