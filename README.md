@@ -46,9 +46,17 @@ was re-verified directly against live sources.
   was actually fetched. Documented in
   [`reference_data/README.md`](reference_data/README.md).
 
-The Section 6 taxonomy-sibling discrepancy flagged in Phase 1 remains open in the spec
-as of v8 (unrelated to this pass, which was scoped to 3a/3b) — still tracked in
-[`reference_data/README.md`](reference_data/README.md).
+The Section 6 taxonomy-sibling discrepancy flagged in Phase 1 was outside this pass's
+scope (3a/3b only) and was still sitting uncorrected in the spec as of v8, three
+versions after being flagged — fixed in v11 after being raised again explicitly.
+**Update, post-v10:** a full diff of every discrepancy flagged anywhere in this repo
+(both READMEs, workflow node notes, script comments) against the current spec text
+found no other gaps — every item flagged through Phase 5 and both verification passes
+is now reflected in spec v11. This paragraph itself was the one piece of stale
+documentation the diff turned up (it previously said the Section 6 issue "remains open
+as of v8," which stopped being true once v11 shipped) — worth noting that keeping this
+file in sync is exactly the kind of thing that needs deliberate re-checking, not
+just the spec.
 
 ## Phase 1 — access, trigger, reference data
 
