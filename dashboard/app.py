@@ -106,7 +106,7 @@ def inject_brand_css():
         .block-container {{
             max-width: 1180px;
             padding-top: 2rem;
-            padding-bottom: 6rem; /* room for the fixed disclosure banner */
+            padding-bottom: 2rem;
         }}
 
         /* KPI cards: custom HTML/CSS, not st.metric (spec explicit) --
@@ -145,18 +145,20 @@ def inject_brand_css():
             margin-top: 0.35rem;
         }}
 
-        /* Persistent, non-dismissible synthetic-CRM disclosure banner. */
+        /* Persistent (always rendered, no dismiss control), but NOT pinned
+           to the viewport -- a fixed-position banner stayed visible while
+           scrolling in a way that read as demanding attention rather than
+           just disclosing. A normal block at the end of the page content
+           is still persistent in the sense the spec means (can't be
+           dismissed, always present), just not glued to the screen. */
         .disclosure-banner {{
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
             background: {SLATE};
             color: {WHITE};
             font-size: 0.8rem;
             padding: 0.65rem 1.5rem;
-            z-index: 999;
+            border-radius: 6px;
             text-align: center;
+            margin-top: 2rem;
         }}
 
         .queue-table {{
