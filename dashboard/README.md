@@ -254,17 +254,35 @@ Rewrite each in plain language that stands on its own (e.g. "directional signal,
 certified accuracy score" instead of "(Section 8)") before this dashboard is shown to
 anyone who isn't reading the spec alongside it.
 
-## Swapping in a live Google Sheets read later
+## Sourcing `records` from the real Google Sheet
 
-`app.py`'s only coupling to the local-file data source is `load_pipeline_log()`. The
-n8n side of storage now exists (`Google Sheets: Log Decision`, see the main README's
-"Storage and dedup" — still untested against a live Sheets, but structurally wired),
-so once that's confirmed working, replacing this one function with a Sheets read is
-the whole dashboard-side change — every KPI/chart function downstream already takes a
-plain list of record dicts and doesn't know or care where they came from. Column names
-in the row this dashboard would read match `scripts/build_workflow.js`'s
-`flattenForSheets()` output, not `pipeline_log.json`'s current nested shape — the flat
-`agent1_severity`/`agent2_citation`/etc. columns, not `agents.agent1.output.severity`
-— so `load_pipeline_log()`'s replacement needs to reshape those flat columns back into
-the nested form every other function in this file expects, or those functions need
-updating to match. Not a large change, just not a completely free one.
+`app.py` itself is unchanged from the local-file design: its only coupling to the data
+source is `load_pipeline_log()`, which just reads `dashboard/data/pipeline_log.json` —
+every KPI/chart function downstream takes a plain list of record dicts and doesn't know
+or care where they came from. What changed is how that JSON file gets generated.
+
+`scripts/export_dashboard_data.mjs --from-sheets` reads
+`dashboard/data/sheets_snapshot.json` — a point-in-time snapshot of what's genuinely
+stored in the real "Pipeline Log" Google Sheet, fetched via an authenticated Sheets API
+read — and reshapes each flat row (`agent1_severity`, `agent2_citation`, etc., matching
+`scripts/build_workflow.js`'s `flattenForSheets()` output exactly) back into the nested
+shape (`agents.agent1.output.severity`, etc.) every function in this file expects. See
+`reshapeSheetRow()` in that script for the transform, including two disclosed inference
+rules for fields the flat schema doesn't store at all (`agent3`/`agent4` `tool_used`,
+`agent3.tool_result.found` — reconstructed from a verified architectural invariant, not
+guessed; the function's own comment explains why it's provably correct).
+
+This is a real, working data path, verified live in the dashboard — but it's
+**on-demand, not automatic**: refreshing `sheets_snapshot.json` itself requires an
+authenticated Sheets API call (currently done via an already-signed-in MCP tool, not
+by this script), and there's no standalone Google API credential (e.g. a service
+account) wired up for the Streamlit process to fetch it live on every page load. See
+the main README's "Live dashboard data source" section for the operational model and
+what a fully-automatic version would need.
+
+Consequence worth knowing: the real Sheet only contains whatever has actually been
+written to it by a genuine n8n execution or direct write, which as of this build is
+5 of the 10 fixture tickets — so `--from-sheets` produces `n=5` decided records, not
+the `n=10` the simulator-driven default produces. Both are real in their own way: the
+simulator proves the pipeline *logic*, `--from-sheets` proves the *storage* layer, and
+neither one is padded or fabricated.
