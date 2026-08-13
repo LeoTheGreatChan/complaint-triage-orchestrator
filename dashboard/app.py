@@ -392,7 +392,7 @@ def chart_confidence_distribution(records):
     fig = go.Figure()
     for i, agent_key in enumerate(["agent1", "agent4"]):
         agent_num = 1 if agent_key == "agent1" else 4
-        label = f"Agent {agent_num} ({AGENT_INFO[agent_num]['name']})"
+        label = f"Agent {agent_num}"
         values, labels = [], []
         for r in records:
             out = r["agents"][agent_key]["output"] or {}
@@ -414,11 +414,11 @@ def chart_confidence_distribution(records):
 
 def chart_tool_use_frequency(records):
     tool_labels = {
-        "agent1": f"Agent 1 ({AGENT_INFO[1]['name']}): taxonomy lookup",
-        "agent2_regulation": f"Agent 2 ({AGENT_INFO[2]['name']}): regulation index (always)",
-        "agent2_crm": f"Agent 2 ({AGENT_INFO[2]['name']}): broader CRM lookup",
-        "agent3": f"Agent 3 ({AGENT_INFO[3]['name']}): exact clause fetch",
-        "agent4": f"Agent 4 ({AGENT_INFO[4]['name']}): re-verify",
+        "agent1": "Agent 1: taxonomy lookup",
+        "agent2_regulation": "Agent 2: regulation index (always)",
+        "agent2_crm": "Agent 2: broader CRM lookup",
+        "agent3": "Agent 3: exact clause fetch",
+        "agent4": "Agent 4: re-verify",
     }
     counts = {k: 0 for k in tool_labels}
     for r in records:
@@ -443,7 +443,7 @@ def chart_tool_use_frequency(records):
             textposition="outside",
         )
     )
-    fig.update_layout(xaxis=dict(range=[0, n + 0.5], dtick=1), margin=dict(l=270))
+    fig.update_layout(xaxis=dict(range=[0, n + 0.5], dtick=1), margin=dict(l=190))
     return plotly_brand_layout(fig, "Tool-use frequency (of tickets processed)")
 
 
