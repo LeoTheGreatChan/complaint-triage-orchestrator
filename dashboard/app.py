@@ -492,6 +492,50 @@ def render_queue_table(records):
     )
 
 
+def render_auto_resolved_table(records):
+    auto_resolved = [r for r in records if r["decision"] == "AUTO_RESOLVE"]
+    if not auto_resolved:
+        st.markdown(
+            '<p class="section-caption">No tickets have auto-resolved yet in this log — all 3 fixtures '
+            "escalate (see the ground-truth section of the main README for why that's expected, not a "
+            "bug). This table renders correctly once a real record has decision=AUTO_RESOLVE.</p>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    rows = []
+    for r in auto_resolved:
+        draft = r.get("draft") or ""
+        draft_preview = (draft[:110] + "…") if len(draft) > 110 else draft
+        confidence = (r["agents"]["agent4"]["output"] or {}).get("confidence")
+        confidence_str = f"{confidence:.2f}" if confidence is not None else "—"
+        rows.append(
+            f"""
+            <tr>
+                <td class="mono">{r['complaint_id']}</td>
+                <td>{r['company']}</td>
+                <td>{r['issue']}</td>
+                <td>{draft_preview}</td>
+                <td>{confidence_str}</td>
+            </tr>
+            """
+        )
+
+    md_html(
+        f"""
+        <table class="queue-table">
+            <thead>
+                <tr>
+                    <th>Complaint ID</th><th>Company</th><th>Issue</th>
+                    <th>Draft (sent automatically)</th><th>QA confidence</th>
+                </tr>
+            </thead>
+            <tbody>{''.join(rows)}</tbody>
+        </table>
+        """
+    )
+
+
 # ---------------------------------------------------------------------------
 # Agent legend -- what "Agent 1/2/3/4" mean, spec Section 6. Rendered as a
 # persistent reference at the top of the Technical detail tab rather than
@@ -569,8 +613,24 @@ def main():
         with right:
             st.plotly_chart(chart_category_breakdown(records), width='stretch')
 
-        st.markdown("#### Queue: drafts awaiting human review")
-        render_queue_table(records)
+        # A Plotly bar-click -> table-filter interaction was tried first (spec
+        # intent: "click a bar, see its table") and dropped after it couldn't
+        # be made to work reliably -- neither a plain click nor a box-select
+        # drag ever produced a non-empty chart_state.selection.points, tried
+        # with and without explicit clickmode/dragmode. Rather than ship an
+        # interaction that might not fire for a real user either,
+        # st.segmented_control gives the same practical outcome (choose which
+        # queue to view) through a widget that's actually guaranteed to work.
+        queue_view = st.segmented_control(
+            "Queue view", ["Escalated to human", "Auto-resolved"],
+            default="Escalated to human", key="queue_view", label_visibility="collapsed",
+        )
+        if queue_view == "Auto-resolved":
+            st.markdown("#### Queue: auto-resolved tickets")
+            render_auto_resolved_table(records)
+        else:
+            st.markdown("#### Queue: drafts awaiting human review")
+            render_queue_table(records)
 
     with tab_technical:
         st.markdown(

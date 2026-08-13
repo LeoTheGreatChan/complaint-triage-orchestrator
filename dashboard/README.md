@@ -44,6 +44,31 @@ test-harness executions. See each `kpi_*` function in `app.py` for the exact
 computation and reasoning. Escalation agreement in particular is expected to read `0%`
 here — see the ground-truth section of the main README before treating that as a bug.
 
+## Queue view: escalated vs. auto-resolved
+
+A `st.segmented_control` ("Escalated to human" / "Auto-resolved") right below the
+decision-breakdown chart switches which table renders underneath — `render_queue_table`
+or the newer `render_auto_resolved_table`. Defaults to the escalated queue.
+
+**What was tried first and dropped:** click-a-bar-to-filter, using
+`st.plotly_chart(..., on_select="rerun", selection_mode="points")`. This never worked
+in testing — neither a plain click nor a box-select drag ever produced a non-empty
+`chart_state.selection.points`, tried with and without `clickmode="event+select"` and
+`dragmode="select"` set explicitly on the figure. Bar-trace click-selection is known to
+be finicky in Plotly.js, and there's no confidence this would reliably fire for a real
+user's mouse either, automation or not. Rather than ship an interaction that might
+silently do nothing, it was replaced with the segmented control — same practical
+outcome (choose which queue to look at), a widget that's guaranteed to work. If you
+want to take another run at the chart-click version, the removed code (and the debug
+`st.write(chart_state)` that showed empty selections) is in the git history around this
+commit.
+
+`render_auto_resolved_table` currently always renders its "no auto-resolved tickets
+yet" empty state, since none of the 3 real fixtures auto-resolve (same expected
+imbalance as the KPIs) — verified against a temporary 1-escalate/1-auto-resolve test
+fixture swapped into `pipeline_log.json` and back, not against real data, since no real
+data with that shape exists yet.
+
 ## Before a production / client-facing launch
 
 Right now the UI cites the spec directly in a few places — `"(spec Section 8)"`,
