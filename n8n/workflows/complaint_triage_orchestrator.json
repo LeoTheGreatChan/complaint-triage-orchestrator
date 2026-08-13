@@ -207,7 +207,7 @@
       "parameters": {
         "mode": "runOnceForEachItem",
         "language": "javaScript",
-        "jsCode": "const t = $input.item.json;\nreturn { json: { complaint_id: t.complaint_id, product: t.product, note: \"Live ticket -- no Phase 3 mock fixture exists for this complaint_id. Awaiting the real Claude API swap at Phase 7.\" } };"
+        "jsCode": "// Real ticket, real synthetic CRM (Phase 1/2 both genuinely ran) -- just no\n// agent decision, since Phase 3's mock agents only have fixture data for\n// Tickets A/B/C. Carries the real fields already computed upstream rather\n// than the bare complaint_id/product this used to return, so a dashboard\n// can show something useful for these instead of just a count -- still\n// zero fabricated reasoning: no severity, no draft, no escalation call.\nconst t = $input.item.json;\nreturn {\n  json: {\n    complaint_id: t.complaint_id, company: t.company, product: t.product, state: t.state,\n    issue: t.issue, sub_issue: t.sub_issue, tags: t.tags, date_received: t.date_received,\n    timely: t.timely, company_response: t.company_response,\n    crm_summary: t.crm ? { account_tier: t.crm.account_tier, tenure_years: t.crm.tenure_years, special_population_flag: t.crm.special_population_flag } : null,\n    decision: \"AWAITING_PHASE_7\",\n    note: \"Live ticket -- no Phase 3 mock fixture exists for this complaint_id. Awaiting the real Claude API swap at Phase 7.\",\n  },\n};"
       },
       "id": "b2f7d3a1-0000-4000-8000-000000000005",
       "name": "Live Ticket (Awaiting Phase 7)",

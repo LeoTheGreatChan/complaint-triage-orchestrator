@@ -8,7 +8,11 @@
  * correctly, not just the logic that generated them.
  *
  * Only understands the node types this workflow actually uses (manual/schedule
- * trigger, code, if) -- it is not a general n8n runtime.
+ * trigger, code, if, httpRequest, googleSheets) -- it is not a general n8n
+ * runtime. httpRequest makes a REAL network call (only this workflow's one
+ * use of it -- the CFPB Complaint Search node -- is supported, via a small
+ * special-cased query-parameter builder, not a general n8n expression
+ * evaluator).
  *
  * Run: node scripts/simulate_workflow.mjs
  * Exits non-zero if any assertion fails.
@@ -22,20 +26,48 @@ const WORKFLOW_PATH = path.join(REPO_ROOT, "n8n/workflows/complaint_triage_orche
 const workflow = JSON.parse(fs.readFileSync(WORKFLOW_PATH, "utf-8"));
 const nodesByName = Object.fromEntries(workflow.nodes.map((n) => [n.name, n]));
 
-function runCodeNode(node, items) {
+function runCodeNode(node, items, staticDataStore) {
   const { mode, jsCode } = node.parameters;
+  // n8n's workflow static data is scoped per-node and persists across
+  // executions within a run -- Get Watermark reads/writes it. A plain
+  // in-memory object keyed by node name is a faithful stand-in for the
+  // lifetime of one execute() call (a fresh Node process = a fresh workflow
+  // run, matching "first run, no watermark yet" semantics correctly).
+  const $getWorkflowStaticData = () => (staticDataStore[node.name] ||= {});
   if (mode === "runOnceForAllItems") {
     const $input = { all: () => items.map((it) => ({ json: it })), first: () => ({ json: items[0] }) };
-    const fn = new Function("$input", jsCode);
-    return fn($input).map((r) => r.json);
+    const fn = new Function("$input", "$getWorkflowStaticData", jsCode);
+    return fn($input, $getWorkflowStaticData).map((r) => r.json);
   }
   // runOnceForEachItem: n8n calls the code once per item, each time with
   // $input.item bound to that single item.
   return items.map((it) => {
     const $input = { item: { json: it } };
-    const fn = new Function("$input", jsCode);
-    return fn($input).json;
+    const fn = new Function("$input", "$getWorkflowStaticData", jsCode);
+    return fn($input, $getWorkflowStaticData).json;
   });
+}
+
+// Resolves the one n8n expression shape this workflow's query parameters
+// actually use: "={{ $json.fieldName }}". Not a general expression
+// evaluator -- there's exactly one real use (CFPB Complaint Search's
+// date_received_min), and this deliberately doesn't try to be more than that.
+function resolveExpression(value, item) {
+  if (typeof value !== "string") return value;
+  const match = value.match(/^=\{\{\s*\$json\.(\w+)\s*\}\}$/);
+  return match ? item[match[1]] : value;
+}
+
+async function runHttpRequestNode(node, items) {
+  const { url, queryParameters } = node.parameters;
+  const params = new URLSearchParams();
+  for (const p of queryParameters?.parameters || []) {
+    params.append(p.name, resolveExpression(p.value, items[0] || {}));
+  }
+  const resp = await fetch(`${url}?${params.toString()}`);
+  if (!resp.ok) throw new Error(`CFPB API returned HTTP ${resp.status} for ${url}?${params}`);
+  const body = await resp.json();
+  return [body]; // n8n's HTTP Request node returns the parsed response as one item.
 }
 
 function runIfNode(node, items) {
@@ -61,9 +93,10 @@ function runIfNode(node, items) {
  * Most callers want `trace` for a specific node's rich output shape;
  * `terminal` is for "what came out the end of the whole graph."
  */
-export function execute(startNodeName, initialItems) {
+export async function execute(startNodeName, initialItems) {
   const trace = {};
   const terminal = {};
+  const staticDataStore = {};
   const queue = [[startNodeName, initialItems]];
 
   while (queue.length > 0) {
@@ -86,7 +119,17 @@ export function execute(startNodeName, initialItems) {
       continue;
     }
     if (node.type === "n8n-nodes-base.code") {
-      const outItems = runCodeNode(node, items);
+      const outItems = runCodeNode(node, items, staticDataStore);
+      trace[nodeName] = (trace[nodeName] || []).concat(outItems);
+      if (!outgoing[0] || outgoing[0].length === 0) {
+        terminal[nodeName] = (terminal[nodeName] || []).concat(outItems);
+      } else {
+        for (const conn of outgoing[0]) queue.push([conn.node, outItems]);
+      }
+      continue;
+    }
+    if (node.type === "n8n-nodes-base.httpRequest") {
+      const outItems = await runHttpRequestNode(node, items);
       trace[nodeName] = (trace[nodeName] || []).concat(outItems);
       if (!outgoing[0] || outgoing[0].length === 0) {
         terminal[nodeName] = (terminal[nodeName] || []).concat(outItems);
@@ -112,10 +155,10 @@ export function execute(startNodeName, initialItems) {
   return { trace, terminal };
 }
 
-function main() {
+async function main() {
   const failures = [];
 
-  const { trace, terminal } = execute("Fixture Test Trigger (A/B/C)", [{}]);
+  const { trace, terminal } = await execute("Fixture Test Trigger (A/B/C)", [{}]);
   const escalated = trace["Final: Escalate to Human Queue"] || [];
   const autoResolved = trace["Final: Auto-Resolve"] || [];
   const stuck = terminal["Live Ticket (Awaiting Phase 7)"] || [];
@@ -152,9 +195,10 @@ function main() {
   }
 
   // Non-fixture ticket must dead-end, not fabricate a decision. Splice in a
-  // fake post-CRM-generation item directly (the simulator doesn't run the
-  // real CFPB HTTP Request node) to exercise the shared Route/IF gate.
-  const liveRun = execute("Route: Fixture or Live?", [{ complaint_id: "24121673", product: "Credit card", crm: { special_population_flag: false } }]);
+  // fake post-CRM-generation item directly (bypassing the real CFPB HTTP
+  // Request node, which is exercised separately below) to exercise the
+  // shared Route/IF gate.
+  const liveRun = await execute("Route: Fixture or Live?", [{ complaint_id: "24121673", product: "Credit card", crm: { special_population_flag: false } }]);
   const liveStuck = liveRun.terminal["Live Ticket (Awaiting Phase 7)"] || [];
   if (liveStuck.length !== 1) {
     failures.push("Non-fixture ticket did not route to Live Ticket (Awaiting Phase 7) as expected");
@@ -181,4 +225,8 @@ function main() {
   console.log("PASS: workflow JSON, executed exactly as n8n would run it, produces the expected fixture escalations, correctly stops at the live-ticket boundary, and every processed ticket reaches Google Sheets as a flat, keyed row.");
 }
 
-main();
+main().catch((err) => {
+  console.error("SIMULATION FAILED (uncaught):", err);
+  process.exit(1);
+});
+

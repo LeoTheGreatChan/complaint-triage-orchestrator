@@ -27,12 +27,33 @@ of the pipeline logic. Re-run it any time the workflow changes; `pipeline_log.js
 committed so the dashboard runs out of the box without that step, but it will go stale
 if the workflow changes and this isn't re-run.
 
-**Why only 3 records.** Phase 7 (the mock-to-real Claude API swap) hasn't happened —
-every live ticket the Schedule/Manual trigger fetches still dead-ends at "Live Ticket
-(Awaiting Phase 7)." The three Section 6 fixture tickets are the only ones with a
-genuine, fully-processed pipeline decision, so that's what the dashboard shows. It does
-not pad the log with invented tickets to make the charts look fuller — see the
-in-app note under the KPI row, and `app.py`'s module docstring.
+**Why only 3 decided records.** Phase 7 (the mock-to-real Claude API swap) hasn't
+happened — every live ticket the Schedule/Manual trigger fetches still dead-ends at
+"Live Ticket (Awaiting Phase 7)." The three Section 6 fixture tickets are the only ones
+with a genuine, fully-processed pipeline decision, so `records` (what every KPI/chart
+reads) is just those 3. It does not pad the log with invented tickets to make the
+charts look fuller — see the in-app note under the KPI row, and `app.py`'s module
+docstring.
+
+**A second array, `awaiting_records`, holds real undecided tickets, kept fully
+separate.** Pull a real batch (real CFPB fetch, real synthetic CRM, capped at 25 per
+spec Section 5) with:
+
+```bash
+node scripts/export_dashboard_data.mjs --live-batch
+```
+
+Without `--live-batch`, re-running the export script only regenerates `records` from
+the fixtures and leaves whatever `awaiting_records` batch is already in the file alone
+— it does not silently re-fetch or wipe it on every routine regen. The dashboard
+renders this batch in a collapsed expander ("N real tickets fetched live, awaiting
+Phase 7") right under the intro note — real company names, real issues, real dates,
+zero agent output, and explicitly excluded from every KPI/chart, which read `records`
+only. This was also the first time `scripts/simulate_workflow.mjs` executed the live
+Schedule/Manual trigger path at all (`Get Watermark`, the real `CFPB Complaint Search`
+HTTP call, `Cap Batch & Advance Watermark`) — every previous verification only ever
+exercised the fixture-trigger path, so this incidentally closed a real gap in Phase 1's
+own test coverage, four phases later.
 
 ## KPIs: what's real, what's honestly deferred
 

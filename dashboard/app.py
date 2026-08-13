@@ -536,6 +536,50 @@ def render_auto_resolved_table(records):
     )
 
 
+def render_awaiting_table(awaiting_records):
+    # Real tickets, real CRM records, zero agent decision -- kept in its own
+    # section so it can never be mistaken for a decided ticket or leak into
+    # a KPI. See scripts/export_dashboard_data.mjs's module docstring.
+    if not awaiting_records:
+        return
+    rows = []
+    for r in awaiting_records:
+        received = (r.get("date_received") or "")[:10]
+        rows.append(
+            f"""
+            <tr>
+                <td class="mono">{r['complaint_id']}</td>
+                <td>{r['company']}</td>
+                <td>{r['product']}</td>
+                <td>{r['issue']}</td>
+                <td>{r.get('state', '')}</td>
+                <td>{received}</td>
+            </tr>
+            """
+        )
+    with st.expander(f"{len(awaiting_records)} real tickets fetched live, awaiting Phase 7 (no decision yet)"):
+        st.markdown(
+            '<p class="section-caption">Fetched from the real CFPB API and given a real synthetic CRM '
+            "record (Phase 1/2 both genuinely ran) — but no agent has looked at any of these. No "
+            "severity, no draft, no escalation call. Excluded from every KPI and chart above, which are "
+            "computed only from the 3 tickets that have an actual pipeline decision.</p>",
+            unsafe_allow_html=True,
+        )
+        md_html(
+            f"""
+            <table class="queue-table">
+                <thead>
+                    <tr>
+                        <th>Complaint ID</th><th>Company</th><th>Product</th>
+                        <th>Issue</th><th>State</th><th>Date received</th>
+                    </tr>
+                </thead>
+                <tbody>{''.join(rows)}</tbody>
+            </table>
+            """
+        )
+
+
 # ---------------------------------------------------------------------------
 # Agent legend -- what "Agent 1/2/3/4" mean, spec Section 6. Rendered as a
 # persistent reference at the top of the Technical detail tab rather than
@@ -581,6 +625,7 @@ def main():
         return
 
     records = log["records"]
+    awaiting_records = log.get("awaiting_records", [])
 
     tab_overview, tab_technical = st.tabs(["Overview", "Technical detail"])
 
@@ -593,6 +638,8 @@ def main():
                 "Claude API swap; charts below reflect exactly what's real today, not a padded sample.</p>",
                 unsafe_allow_html=True,
             )
+
+        render_awaiting_table(awaiting_records)
 
         cols = st.columns(5)
         hs_val, hs_sub = kpi_hours_saved()

@@ -201,6 +201,13 @@ regulation corpus; Ticket C's Agent 1 taxonomy tool call reproduced the exact Ph
 finding live (confirms the real sub-issue, and its siblings do **not** include an
 "identity theft or fraud" entry).
 
+The simulator is `async` and can execute `httpRequest` nodes with a real network call
+(special-cased for this workflow's one use of it, the CFPB Complaint Search node — not
+a general n8n expression evaluator) and injects an in-memory stand-in for
+`$getWorkflowStaticData` so `Get Watermark` behaves correctly. This means it can drive
+the live Schedule/Manual trigger path end-to-end, not just the fixture path — see "Pull
+a real batch of live tickets" under Phase 6 below.
+
 ### Architecture
 
 **Fixture test harness** (new): a second Manual Trigger, `Fixture Test Trigger (A/B/C)`,
@@ -322,7 +329,9 @@ current fixture set.
    Escalate to Human Queue`.
 3. Running **Manual Trigger** (the live path) will currently route everything to `Live
    Ticket (Awaiting Phase 7)` unless a fetched complaint_id happens to be one of the
-   three fixtures (it won't be — those are a historical snapshot).
+   three fixtures (it won't be — those are a historical snapshot). To pull and inspect a
+   real batch this way without opening n8n, see "Pull a real batch of live tickets"
+   under Phase 6 below — it drives this exact path through the simulator.
 
 ## Phase 5 — ground-truth comparison
 
@@ -413,6 +422,27 @@ Claude API swap. The dashboard shows that real n=3 honestly rather than padding 
 log with invented tickets to make charts look like a fuller pilot run — an in-app note
 under the KPI row says so explicitly, and nothing in the chart/KPI code assumes
 exactly 3 records, so it fills in correctly once a real pilot run accumulates more.
+
+**Pull a real batch of live tickets.** `pipeline_log.json` also carries a second,
+completely separate array, `awaiting_records`: real tickets fetched live from CFPB
+(Phase 1's actual HTTP call, capped at 25 per spec Section 5) with a real synthetic CRM
+record (Phase 2) attached, but no agent decision — no severity, no draft, no escalation
+call. Pull a fresh batch with:
+
+```bash
+node scripts/export_dashboard_data.mjs --live-batch
+```
+
+Without `--live-batch`, re-running the export only regenerates `records` from the
+fixtures and leaves whatever `awaiting_records` batch is already in the file untouched
+— no silent re-fetch. The dashboard renders the batch in a collapsed expander right
+under the KPI-row note; every KPI and chart still reads `records` only, so this can
+never contaminate a metric. Pulling this batch was also the first time
+`scripts/simulate_workflow.mjs` ever executed the live Schedule/Manual trigger path
+(`Get Watermark` → the real `CFPB Complaint Search` HTTP call → `Cap Batch & Advance
+Watermark`) — every earlier verification pass only ever exercised the fixture-trigger
+path, so this incidentally closed a real gap in Phase 1's own test coverage, four
+phases later.
 
 **Of Section 9's five KPIs, three are computed from real data, two are honestly deferred:**
 

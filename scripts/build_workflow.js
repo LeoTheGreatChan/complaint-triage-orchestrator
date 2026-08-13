@@ -978,8 +978,23 @@ return {
 `.trim();
 
 const jsLiveAwaitingPhase7 = `
+// Real ticket, real synthetic CRM (Phase 1/2 both genuinely ran) -- just no
+// agent decision, since Phase 3's mock agents only have fixture data for
+// Tickets A/B/C. Carries the real fields already computed upstream rather
+// than the bare complaint_id/product this used to return, so a dashboard
+// can show something useful for these instead of just a count -- still
+// zero fabricated reasoning: no severity, no draft, no escalation call.
 const t = $input.item.json;
-return { json: { complaint_id: t.complaint_id, product: t.product, note: "Live ticket -- no Phase 3 mock fixture exists for this complaint_id. Awaiting the real Claude API swap at Phase 7." } };
+return {
+  json: {
+    complaint_id: t.complaint_id, company: t.company, product: t.product, state: t.state,
+    issue: t.issue, sub_issue: t.sub_issue, tags: t.tags, date_received: t.date_received,
+    timely: t.timely, company_response: t.company_response,
+    crm_summary: t.crm ? { account_tier: t.crm.account_tier, tenure_years: t.crm.tenure_years, special_population_flag: t.crm.special_population_flag } : null,
+    decision: "AWAITING_PHASE_7",
+    note: "Live ticket -- no Phase 3 mock fixture exists for this complaint_id. Awaiting the real Claude API swap at Phase 7.",
+  },
+};
 `.trim();
 
 const jsPrepareRowForSheets = `
