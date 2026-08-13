@@ -158,7 +158,12 @@ export async function execute(startNodeName, initialItems) {
 async function main() {
   const failures = [];
 
-  const { trace, terminal } = await execute("Fixture Test Trigger (A/B/C)", [{}]);
+  // "Load Fixture Tickets" is its own entry point, not behind a dedicated
+  // trigger node -- a real n8n instance silently drops a workflow's second
+  // n8n-nodes-base.manualTrigger node (confirmed by live import testing),
+  // so the redundant "Fixture Test Trigger (A/B/C)" trigger was removed;
+  // this node needs no real input and is run directly via "Execute step".
+  const { trace, terminal } = await execute("Load Fixture Tickets", [{}]);
   const escalated = trace["Final: Escalate to Human Queue"] || [];
   const autoResolved = trace["Final: Auto-Resolve"] || [];
   const stuck = terminal["Live Ticket (Awaiting Phase 7)"] || [];

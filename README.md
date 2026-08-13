@@ -210,10 +210,20 @@ a real batch of live tickets" under Phase 6 below.
 
 ### Architecture
 
-**Fixture test harness** (new): a second Manual Trigger, `Fixture Test Trigger (A/B/C)`,
-feeds the three literal Section 3a/3c tickets — bypassing the live CFPB fetch and
-random CRM generation — into `Route: Fixture or Live?` → `IF: Is Fixture Ticket?`, the
-same gate the live pipeline's output passes through. Phase 3's mock agents only have
+**Fixture test harness** (new): `Load Fixture Tickets`, a Code node that feeds the
+literal Section 3a/3c fixture tickets — bypassing the live CFPB fetch and random CRM
+generation — into `Route: Fixture or Live?` → `IF: Is Fixture Ticket?`, the same gate
+the live pipeline's output passes through. This node is its own entry point, not behind
+a dedicated trigger node — run it directly via n8n's "Execute step." It originally sat
+behind a second Manual Trigger node (`Fixture Test Trigger (A/B/C)`), removed after live
+n8n import testing (see "How to run" below) surfaced a real platform constraint: n8n
+silently drops a workflow's second `n8n-nodes-base.manualTrigger` node on import rather
+than erroring, so the redundant trigger was never actually reachable in a real n8n
+instance. The custom simulator never caught this, since it just executes the committed
+JSON directly and doesn't enforce n8n's own editor-level constraints — only importing
+into real n8n did. Since `Load Fixture Tickets` needs no real input (it returns literal
+fixture data regardless), dropping the trigger is a genuine simplification, not a
+workaround. Phase 3's mock agents only have
 known-good fixture data for Tickets A/B/C; anything else (i.e. every live ticket Phase
 1 actually fetches) routes to `Live Ticket (Awaiting Phase 7)` — a clearly-labelled
 dead end — rather than fabricating a result. **This means the live Schedule/Manual
@@ -332,12 +342,23 @@ All three were structurally present and correctly wired in the workflow since Ph
 
 ### How to run
 
+**Real-verified against a live local n8n instance for the first time this build**
+(`npx n8n start`, imported via Workflows → Import from File) — every earlier
+verification pass, however thorough, only ever ran the committed JSON through the
+custom simulator, not n8n itself. That first real import caught a genuine bug the
+simulator structurally couldn't: n8n silently drops a workflow's second
+`n8n-nodes-base.manualTrigger` node rather than erroring (31 of 32 nodes survived —
+see "Fixture test harness" above for the fix, removing the redundant trigger). After
+the fix, a clean re-import brought in all 31 nodes, and manually executing `Load
+Fixture Tickets` via n8n's "Execute step" produced the real, correct 10-ticket output
+in the actual n8n engine, not just the simulator.
+
 1. Import [`n8n/workflows/complaint_triage_orchestrator.json`](n8n/workflows/complaint_triage_orchestrator.json)
    into n8n (Workflows → Import from File) — no credentials needed.
-2. Run **Fixture Test Trigger (A/B/C)** manually. 8 of the 10 items should reach
-   `Final: Escalate to Human Queue`, and 2 (Tickets I/J) should reach `Final:
-   Auto-Resolve`. (The node's name is a holdover from when it only carried three; it
-   now carries all ten fixture tickets — see "Untested branches" above.)
+2. Select **Load Fixture Tickets** and run it via "Execute step" (it's its own entry
+   point — see "Fixture test harness" above for why there's no dedicated trigger node).
+   8 of the 10 items should reach `Final: Escalate to Human Queue`, and 2 (Tickets I/J)
+   should reach `Final: Auto-Resolve`.
 3. Running **Manual Trigger** (the live path) will route anything to `Live Ticket
    (Awaiting Phase 7)` unless a fetched complaint_id happens to be one of the ten
    fixtures — three are a fixed historical snapshot, but seven (D-J) were pulled from a
@@ -510,26 +531,27 @@ is the actual dedup mechanism: a re-processed `complaint_id` — which the date-
 watermark overlap flagged since Phase 1 makes a real, expected occurrence, not an edge
 case — updates its existing Sheets row instead of appending a duplicate.
 
-**This is the one part of the workflow that is genuinely untested**, unlike everything
-else in this build. Every Code/IF node has been verified two ways — the generator's
-self-test and `scripts/simulate_workflow.mjs` executing the real committed JSON — but
-neither can call the actual Google Sheets API: there's no live n8n instance and no
-Google credentials available in this environment. What *is* verified: the simulator
-now treats the Sheets node as a terminal that records what would be written, and
-confirms every processed ticket reaches it with `complaint_id` present and every field
-flattened to a primitive (no nested objects a real Sheets cell can't hold). What is
-**not** verified: that the `googleSheets` node's parameter schema is exactly right for a
-current n8n version, or that the Append-or-Update operation actually dedups the way
-described. `documentId`, `sheetName`, and `credentials` are all placeholder values —
+**This is the one part of the workflow that is still genuinely untested.** Every
+Code/IF node has now been verified three ways: the generator's self-test,
+`scripts/simulate_workflow.mjs` executing the real committed JSON, and — new — a real
+local n8n instance actually importing and running it (see "How to run" above). But that
+real-n8n pass didn't touch this node: there's no Google credentials configured in that
+local instance, so it's never made an actual Google Sheets API call. What *is* verified:
+the simulator treats the Sheets node as a terminal that records what would be written,
+and confirms every processed ticket reaches it with `complaint_id` present and every
+field flattened to a primitive (no nested objects a real Sheets cell can't hold). What
+is **not** verified: that the `googleSheets` node's parameter schema is exactly right
+for a current n8n version, or that the Append-or-Update operation actually dedups the
+way described. `documentId`, `sheetName`, and `credentials` are all placeholder values —
 replace them with your own spreadsheet ID and Google Sheets OAuth2 credential before
-running this, and treat the whole node as needing a real import-and-run check on your
-end, not just a code review.
+running this, and treat the whole node as needing a real run check with real
+credentials, not just a code review.
 
 ## Not yet built (Phase 7)
 
-Verification, including the mock-to-real Claude API swap — deliberately held back for
-now to keep real API cost at zero until everything else is finalized. Also awaiting
-Phase 7: a real, live-tested confirmation that the Google Sheets storage/dedup node
-above actually works (see "Storage and dedup"). The dashboard's aggregate "% agreement"
-figure is real but thin (n=3) until a real pilot run accumulates more tickets through
+The mock-to-real Claude API swap itself — deliberately held back for now to keep real
+API cost at zero until everything else is finalized. Also awaiting Phase 7: a real,
+live-tested confirmation that the Google Sheets storage/dedup node above actually works
+with real credentials (see "Storage and dedup"). The dashboard's aggregate "% agreement"
+figure is real but thin (n=10) until a real pilot run accumulates more tickets through
 Phase 7's real agents.

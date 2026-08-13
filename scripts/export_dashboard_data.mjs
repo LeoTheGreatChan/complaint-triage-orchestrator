@@ -43,7 +43,11 @@ const OUT_PATH = path.join(REPO_ROOT, "dashboard/data/pipeline_log.json");
 const INCLUDE_LIVE_BATCH = process.argv.includes("--live-batch");
 
 async function main() {
-  const { trace } = await execute("Fixture Test Trigger (A/B/C)", [{}]);
+  // "Load Fixture Tickets" is its own entry point now, not behind a
+  // dedicated trigger -- see the comment in simulate_workflow.mjs for why
+  // (a real n8n instance silently drops a workflow's second manualTrigger
+  // node; confirmed by live import testing).
+  const { trace } = await execute("Load Fixture Tickets", [{}]);
   const escalated = trace["Final: Escalate to Human Queue"] || [];
   const autoResolved = trace["Final: Auto-Resolve"] || [];
 

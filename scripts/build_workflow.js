@@ -991,10 +991,20 @@ function connect(fromName, toName, outputIndex = 0) {
 // --- jsCode bodies, built from the tested functions above via toString() ---
 
 const jsLoadFixtureTickets = `
-// Fixture Test Trigger path (spec Section 15 Phase 3): the three literal
-// tickets + synthetic CRM records from spec Section 3a/3c, used to test the
+// Fixture test path (spec Section 15 Phase 3): the literal fixture tickets
+// + synthetic CRM records from spec Section 3a/3c, used to test the
 // orchestration, tool-use branching, and escalation gate against known-good
-// data before any real Claude API call exists (Phase 7).
+// data before any real Claude API call exists (Phase 7). This node is its
+// own entry point -- run it directly via n8n's "Execute step" -- rather
+// than sitting behind a dedicated trigger node. A real n8n instance
+// silently drops a workflow's second n8n-nodes-base.manualTrigger node
+// (confirmed by live import: 31 of 32 nodes survived, the missing one was
+// a second Manual Trigger); the custom simulator never caught this since
+// it just executes the committed JSON directly and doesn't enforce n8n's
+// own editor-level constraints. Since this node needs no real input
+// (it returns literal fixture data regardless), dropping the redundant
+// trigger and executing it directly is a genuine simplification, not a
+// workaround.
 const FIXTURE_TICKETS = ${JSON.stringify(FIXTURE_TICKETS, null, 2)};
 return FIXTURE_TICKETS.map((t) => ({ json: t }));
 `.trim();
@@ -1313,8 +1323,7 @@ return { json: flattenForSheets(record) };
 
 // --- Assemble nodes ---
 const nodes = [
-  { parameters: {}, id: "b2f7d3a1-0000-4000-8000-000000000001", name: "Fixture Test Trigger (A/B/C)", type: "n8n-nodes-base.manualTrigger", typeVersion: 1, position: [-400, 320] },
-  codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000002", name: "Load Fixture Tickets", mode: "runOnceForAllItems", jsCode: jsLoadFixtureTickets, position: [-160, 320], notes: "Phase 3 test harness: injects the literal Section 3a/3c Ticket A/B/C fixtures, bypassing the live CFPB fetch and random CRM generation entirely." }),
+  codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000002", name: "Load Fixture Tickets", mode: "runOnceForAllItems", jsCode: jsLoadFixtureTickets, position: [-400, 320], notes: "Phase 3 test harness: injects the literal Section 3a/3c Ticket A/B/C fixtures, bypassing the live CFPB fetch and random CRM generation entirely. Its own entry point -- no dedicated trigger node (see the code comment on jsLoadFixtureTickets); run it directly via n8n's \"Execute step\"." }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000003", name: "Route: Fixture or Live?", mode: "runOnceForEachItem", jsCode: jsRouteFixtureOrLive, position: [740, 0] }),
   ifNode({ id: "b2f7d3a1-0000-4000-8000-000000000004", name: "IF: Is Fixture Ticket?", leftValueExpr: "={{ $json.is_fixture_ticket }}", position: [960, 0] }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000005", name: "Live Ticket (Awaiting Phase 7)", mode: "runOnceForEachItem", jsCode: jsLiveAwaitingPhase7, position: [1180, 140], notes: "Terminal node for live (non-fixture) tickets. Phase 3's mock agents only cover Tickets A/B/C -- a real ticket needs the Phase 7 Claude API swap before it can be triaged." }),
@@ -1347,7 +1356,6 @@ const nodes = [
 ];
 
 const connections = [
-  connect("Fixture Test Trigger (A/B/C)", "Load Fixture Tickets"),
   connect("Load Fixture Tickets", "Route: Fixture or Live?"),
   connect("Generate Synthetic CRM Record", "Route: Fixture or Live?"),
   connect("Route: Fixture or Live?", "IF: Is Fixture Ticket?"),
@@ -1393,11 +1401,43 @@ const connections = [
 // rather than appending duplicates or leaving stale copies from a previous
 // run. Phase 1/2 nodes (anything this script doesn't define) are left
 // untouched.
+//
+// Explicit allowlist, not "keep whatever isn't currently owned": that
+// inverse logic is what let a real bug through -- removing a node from
+// `nodes` above (e.g. the redundant "Fixture Test Trigger (A/B/C)", found
+// via live n8n import testing: it silently drops a workflow's second
+// n8n-nodes-base.manualTrigger node) makes this script stop re-asserting
+// it, but the old "keep unrecognized" filter treated the leftover as an
+// untouchable Phase 1/2 node forever, since it has no memory of what it
+// used to own. An unrecognized node now fails loudly instead of lingering
+// silently -- if Phase 1/2 genuinely grows a new node, add its name here.
+const PHASE_1_2_NODE_NAMES = new Set([
+  "Schedule Trigger (15 min)",
+  "Manual Trigger",
+  "Get Watermark",
+  "CFPB Complaint Search",
+  "Cap Batch & Advance Watermark",
+  "Generate Synthetic CRM Record",
+]);
+
 function main() {
   const workflow = JSON.parse(fs.readFileSync(WORKFLOW_PATH, "utf-8"));
   const ownedNames = new Set(nodes.map((n) => n.name));
 
-  const keptNodes = workflow.nodes.filter((n) => !ownedNames.has(n.name));
+  const unrecognized = workflow.nodes
+    .map((n) => n.name)
+    .filter((name) => !ownedNames.has(name) && !PHASE_1_2_NODE_NAMES.has(name));
+  if (unrecognized.length > 0) {
+    throw new Error(
+      `Refusing to write: found node(s) in the existing workflow file that this script neither owns nor ` +
+      `recognizes as Phase 1/2: ${unrecognized.join(", ")}. If this is a genuinely new Phase 1/2 node, add it ` +
+      `to PHASE_1_2_NODE_NAMES. If it's a leftover from a node this script used to own, remove it from the ` +
+      `committed JSON directly -- this filter can't tell the difference from name alone, and silently ` +
+      `preserving it is exactly the bug that let "Fixture Test Trigger (A/B/C)" linger after removal.`
+    );
+  }
+
+  const keptNodes = workflow.nodes.filter((n) => PHASE_1_2_NODE_NAMES.has(n.name));
   workflow.nodes = [...keptNodes, ...nodes];
 
   // Drop any connection entries this script owns (either as source or as a
