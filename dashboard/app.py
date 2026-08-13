@@ -490,9 +490,9 @@ def main():
         st.markdown("<br>", unsafe_allow_html=True)
         left, right = st.columns(2)
         with left:
-            st.plotly_chart(chart_decision_breakdown(records), use_container_width=True)
+            st.plotly_chart(chart_decision_breakdown(records), width='stretch')
         with right:
-            st.plotly_chart(chart_category_breakdown(records), use_container_width=True)
+            st.plotly_chart(chart_category_breakdown(records), width='stretch')
 
         st.markdown("#### Queue: drafts awaiting human review")
         render_queue_table(records)
@@ -505,12 +505,12 @@ def main():
         )
         left, right = st.columns(2)
         with left:
-            st.plotly_chart(chart_confidence_distribution(records), use_container_width=True)
+            st.plotly_chart(chart_confidence_distribution(records), width='stretch')
         with right:
-            st.plotly_chart(chart_tool_use_frequency(records), use_container_width=True)
+            st.plotly_chart(chart_tool_use_frequency(records), width='stretch')
 
         st.markdown("#### Raw pipeline log")
-        st.dataframe(pd.json_normalize(records), use_container_width=True, height=300)
+        st.dataframe(pd.json_normalize(records), width='stretch', height=300)
 
         with st.expander("Other required disclosures (spec Section 14)"):
             st.markdown(
