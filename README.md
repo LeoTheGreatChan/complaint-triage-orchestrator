@@ -5,7 +5,9 @@ real federal regulation text, a disclosed synthetic CRM layer, and four genuine
 conditional-tool-use LLM agents (n8n native AI/LLM agent nodes) feeding a deterministic
 escalation gate. Full spec: `../Docs/Complaint_Triage_Orchestrator_Spec.md`.
 
-**Status: Phase 6 of 7 complete.** See Section 15 of the spec for the full phase list.
+**Status: Phase 7 in progress — structure built, real-API verification not yet run.**
+See Section 15 of the spec for the full phase list, and "Phase 7 — the mock-to-real
+Claude API swap" below for exactly what's done and what's left.
 (Phase 4's escalation gate was built during Phase 3 — see that section below.)
 
 ## Field-claim verification pass (Section 3a/3b, post-v8)
@@ -644,12 +646,105 @@ committed generator and JSON; picking it up in a real running n8n install needs 
 not an import on top of the current one) plus re-attaching the real Google Sheets
 credential by hand, since credentials never travel with the exported JSON.
 
-## Not yet built (Phase 7)
+## Phase 7 — the mock-to-real Claude API swap
 
-The mock-to-real Claude API swap — the last deliberately-held-back piece, to keep real
-API cost at zero until everything else is finalized. Every other phase's verification
-checklist item (real n8n import, real end-to-end execution, real Google Sheets write and
-dedup) is now closed. The dashboard's aggregate "% agreement" figure is real but thin
-(n=10, both from the simulator and from the real Sheet — see Phase 6's "Live dashboard
-data source") until a real pilot run accumulates more tickets through Phase 7's real
-agents.
+**Structure built, not yet run for real.** Every other phase's verification checklist
+item (real n8n import, real end-to-end execution, real Google Sheets write and dedup)
+was already closed; this phase's own real-API-call spend was deliberately held back
+until everything else was finalized, per the spec. The generator, wiring, and safety
+guards below are complete and pass the free simulator; the actual paid verification
+run (comparing real agent output against the Section 6 fixtures) has not happened yet.
+
+### Two parallel paths, not one replacing the other
+
+The mock chain (`Load Fixture Tickets` → mock Agent 1–4) stays exactly as it was —
+**not** removed or replaced. Reason: it's the only thing that lets
+`scripts/simulate_workflow.mjs` keep verifying the pipeline's wiring for free. A real
+n8n AI/LLM node's output isn't reproducible without actually calling the API, so once
+Agent 1–4 become real, the simulator loses the ability to test *anything* downstream
+of them unless the mock path still exists alongside. That mock path proved its worth
+immediately: it caught the Merge-node retrofit's correctness for free, with zero API
+spend, and would do the same for any future structural change.
+
+So the committed workflow now has two full agent chains side by side:
+- **Test path** (top row on the canvas, unchanged): `Load Fixture Tickets` → mock
+  Agent 1–4 — free, deterministic, zero API cost.
+- **Product path** (bottom row, new): a genuinely live ticket — `IF: Is Fixture
+  Ticket?`'s false branch, which used to dead-end at "Live Ticket (Awaiting Phase 7)"
+  — now flows into real Agent 1–4.
+
+Both rows converge into one shared tail (`Compute Escalation Signals` onward) via a
+new `Merge: Test/Product Final` node, since the escalation math, ground-truth
+comparison, and Sheets write are pure, agent-source-agnostic logic (spec Section
+7/8/11) — no reason to duplicate those too.
+
+### Why a plain HTTP Request node, not n8n's LangChain AI Agent node
+
+Real Agent 1–4 call Anthropic's Messages API directly via `n8n-nodes-base.httpRequest`
+(one real, proven-working node type — see "CFPB Complaint Search" — that this
+generator, the simulator, and a real live import have all already verified), not one
+of n8n's LangChain AI Agent / Chat Model nodes. Three reasons:
+1. **Unverified ground avoided.** The LangChain node family's exact parameter shape,
+   typeVersion, and non-`"main"` connection type (`ai_languageModel`, not a plain data
+   edge) would all be new and unconfirmed against this n8n instance — httpRequest
+   isn't.
+2. **Predictable cost.** Exactly one Messages API call per agent per ticket, always —
+   no autonomous multi-turn tool-calling loop that could silently consume extra calls.
+3. **The real "tools" don't need a hosted tool-call round-trip.** Taxonomy lookup,
+   regulation search, exact clause fetch, and CRM reads are deterministic reads against
+   this repo's own cached reference data (already real, already tested — see "The
+   regulation-index tool" above). Each real agent's only job is to decide WHETHER a
+   ticket needs one and supply its own reasoning, via a system prompt that asks for the
+   exact same `agentN_tool_used` / `agentN_output` JSON shape the mock nodes already
+   produce — so every downstream Tool/IF/Merge node needs zero changes to consume real
+   output instead of a fixture lookup.
+
+Model: `claude-haiku-4-5-20251001` (cost-efficient — this is structured
+classification/extraction, not open-ended reasoning), one flat constant in
+`build_workflow.js` (`ANTHROPIC_MODEL`), easy to change in one place.
+
+**UNVERIFIED AGAINST A LIVE N8N INSTANCE**, same honesty flag as `googleSheetsNode()`:
+the generic-header-auth parameter shape for `httpRequest` (`authentication:
+"genericCredentialType"`, `genericAuthType: "httpHeaderAuth"`) is built to the best
+available knowledge, not live-tested. Confirm the credential wiring on import — you'll
+need to create an n8n "Header Auth" credential with header name `x-api-key` and your
+real Anthropic API key as the value, then attach it to each of the 4 Real Agent nodes
+(they currently point at `REPLACE_WITH_YOUR_ANTHROPIC_CREDENTIAL_ID` placeholders).
+
+### A real near-miss, caught before it cost anything
+
+While building this, the simulator's own self-test — which injects a synthetic live
+ticket to verify routing — started reaching the real `https://api.anthropic.com/v1/messages`
+URL the moment the Product path replaced the old dead-end, and attempted a real
+(malformed, unauthenticated) fetch. It failed harmlessly with an HTTP 405, but this
+is exactly the kind of accidental spend that must never be possible from a free,
+automated test. Fixed with a hard allowlist in `simulate_workflow.mjs`'s
+`runHttpRequestNode()`: only the CFPB endpoint (free, public, unauthenticated) may
+ever actually be fetched; anything else is stubbed as a pass-through, and the
+self-test itself was rewritten to check the Product path's wiring statically (reading
+`workflow.connections` directly) rather than by executing into it.
+
+### Two-row canvas layout + sticky notes
+
+Built for a marketing recording that walks the canvas from trigger to end note: Test
+path nodes sit at Y ≈ −140/−260, Product path nodes at Y ≈ 400/520, same X-columns
+where the two rows run in parallel. Six sticky notes, all `n8n-nodes-base.stickyNote`
+(also unverified against live import — confirm the color numbers render as intended):
+two color-coded row labels (short title + one-line explanation each), plus four
+agent-role cards positioned above the real Agent 1–4 nodes, their content parsed
+directly out of `dashboard/app.py`'s `AGENT_INFO` dict at generation time (a small
+targeted regex, not a full Python parser) — so the canvas description and the
+dashboard's own Technical-detail tab can never drift into two different descriptions
+of the same four agents.
+
+### What's left before this phase is actually done
+
+1. Re-import into a fresh n8n workflow (see "Re-importing into an existing
+   installation" above) and attach the real Anthropic credential.
+2. Run the verification the spec itself calls for: the 3 original Section 6 fixtures
+   (A/B/C) through the real Product path, compared against their mock-fixture
+   equivalents — 12 real API calls, the only spend in this whole phase.
+3. Confirm dedup still holds with real agent output, same test as the earlier
+   Sheets-write verification.
+4. Measure real per-ticket processing time for the dashboard's "Hours saved / ticket"
+   and "SLA compliance" KPIs, still sitting as "Awaiting Phase 7."

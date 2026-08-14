@@ -58,8 +58,34 @@ function resolveExpression(value, item) {
   return match ? item[match[1]] : value;
 }
 
+// Allowlist, not a denylist -- this free, automated simulator must NEVER
+// make a real call to a paid API (Phase 7's Anthropic agent nodes) under
+// any circumstance, including a test path reaching them by surprise (this
+// happened once already: the self-test's synthetic live-ticket injection
+// started reaching "Real Agent 1" the moment the Product path replaced
+// "Live Ticket (Awaiting Phase 7)", and this function attempted a real,
+// malformed fetch to api.anthropic.com before this guard existed). Only
+// the CFPB endpoint -- free, public, unauthenticated -- is allowed through.
+const REAL_HTTP_CALLS_ALLOWED = new Set([
+  "https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1/",
+]);
+
 async function runHttpRequestNode(node, items) {
   const { url, queryParameters } = node.parameters;
+  if (!REAL_HTTP_CALLS_ALLOWED.has(url)) {
+    // A Phase 7 real-agent call (or anything else not explicitly
+    // allowlisted): the simulator can't fake a real model response, and
+    // must not spend real money automatically. Stub it as a pass-through --
+    // downstream nodes will fail loudly if they need fields only a real
+    // response would provide, which is the correct behavior for a free
+    // regression test that was never meant to reach this node for real.
+    return items;
+  }
+  // Safe (and correct) to skip the real fetch on zero items regardless of
+  // URL -- but still RETURN an empty array rather than being skipped by the
+  // caller entirely, so a Merge node downstream still sees this as "this
+  // branch delivered, with nothing," not "this branch never ran."
+  if (items.length === 0) return [];
   const params = new URLSearchParams();
   for (const p of queryParameters?.parameters || []) {
     params.append(p.name, resolveExpression(p.value, items[0] || {}));
@@ -169,10 +195,13 @@ export async function execute(startNodeName, initialItems) {
       continue;
     }
 
-    // Every other node type is a no-op on zero items, EXCEPT httpRequest
-    // (a real network call -- skip rather than fire with empty params) and
-    // Merge (handled above, since it needs to see empty deliveries too).
-    if (items.length === 0 && node.type !== "n8n-nodes-base.if" && node.type !== "n8n-nodes-base.code") {
+    // manualTrigger/scheduleTrigger are the only node types left that don't
+    // safely handle zero items on their own (if/code/httpRequest/
+    // googleSheets all do, and Merge is handled above) -- but a trigger is
+    // always the very first node in a queue entry with real initialItems,
+    // never a zero-item delivery, so this is a defensive no-op in practice,
+    // not a load-bearing skip.
+    if (items.length === 0 && (node.type === "n8n-nodes-base.manualTrigger" || node.type === "n8n-nodes-base.scheduleTrigger")) {
       continue;
     }
 
@@ -235,10 +264,13 @@ async function main() {
   const { trace, terminal } = await execute("Load Fixture Tickets", [{}]);
   const escalated = trace["Final: Escalate to Human Queue"] || [];
   const autoResolved = trace["Final: Auto-Resolve"] || [];
-  const stuck = terminal["Live Ticket (Awaiting Phase 7)"] || [];
+  // Since Phase 7, a live (non-fixture) ticket routes to the Product path's
+  // "Real Agent 1: Classification" instead of the old "Live Ticket
+  // (Awaiting Phase 7)" dead end -- fixture tickets should never reach it.
+  const stuck = trace["Real Agent 1: Classification"] || [];
   const sheetsRows = terminal["Google Sheets: Log Decision"] || [];
 
-  console.log(`Fixture run: ${escalated.length} escalated, ${autoResolved.length} auto-resolved, ${stuck.length} awaiting Phase 7, ${sheetsRows.length} rows reaching Google Sheets.`);
+  console.log(`Fixture run: ${escalated.length} escalated, ${autoResolved.length} auto-resolved, ${stuck.length} reaching the Product path, ${sheetsRows.length} rows reaching Google Sheets.`);
 
   const expectedEscalateIds = ["9999970", "9999975", "9999983", "24158082", "24157871", "24157473", "24157200", "24157609"];
   for (const id of expectedEscalateIds) {
@@ -248,7 +280,7 @@ async function main() {
   for (const id of expectedAutoResolveIds) {
     if (!autoResolved.some((e) => e.complaint_id === id)) failures.push(`Ticket ${id} did not reach Final: Auto-Resolve`);
   }
-  if (stuck.length !== 0) failures.push(`Fixture tickets should never route to "Live Ticket (Awaiting Phase 7)", but ${stuck.length} did`);
+  if (stuck.length !== 0) failures.push(`Fixture tickets should never route to the Product path's "Real Agent 1: Classification", but ${stuck.length} did`);
 
   // Exactly one of the five real "escalate" tickets added after A/B/C (D)
   // genuinely trips the real regulation-index search tool; four (E/F/G/H)
@@ -289,14 +321,16 @@ async function main() {
     }
   }
 
-  // Non-fixture ticket must dead-end, not fabricate a decision. Splice in a
-  // fake post-CRM-generation item directly (bypassing the real CFPB HTTP
-  // Request node, which is exercised separately below) to exercise the
-  // shared Route/IF gate.
-  const liveRun = await execute("Route: Fixture or Live?", [{ complaint_id: "24121673", product: "Credit card", crm: { special_population_flag: false } }]);
-  const liveStuck = liveRun.terminal["Live Ticket (Awaiting Phase 7)"] || [];
-  if (liveStuck.length !== 1) {
-    failures.push("Non-fixture ticket did not route to Live Ticket (Awaiting Phase 7) as expected");
+  // Non-fixture ticket must route to the real Product path, not fabricate a
+  // decision or dead-end. A genuine execute() run can't verify this any
+  // further than confirming routing -- "Real Agent 1: Classification" makes
+  // a real, paid API call the free simulator must never trigger on its own
+  // (this happened once already, see the guard in runHttpRequestNode()), so
+  // this is a static check of the committed connection graph instead of a
+  // runtime one.
+  const isFixtureFalseOutput = (workflow.connections["IF: Is Fixture Ticket?"]?.main || [])[1] || [];
+  if (!isFixtureFalseOutput.some((c) => c.node === "Real Agent 1: Classification")) {
+    failures.push('"IF: Is Fixture Ticket?"\'s false branch should route to "Real Agent 1: Classification", not a dead end');
   }
 
   // Google Sheets dedup row (spec Section 11): every processed ticket --

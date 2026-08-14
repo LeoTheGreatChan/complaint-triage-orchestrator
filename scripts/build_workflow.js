@@ -21,6 +21,24 @@ const path = require("node:path");
 const REPO_ROOT = path.resolve(__dirname, "..");
 const WORKFLOW_PATH = path.join(REPO_ROOT, "n8n/workflows/complaint_triage_orchestrator.json");
 
+// Read straight from the dashboard's own AGENT_INFO dict (Python, not JSON --
+// a small targeted regex, not a full parser, since this is one fixed-shape
+// literal) so the canvas sticky notes and the dashboard's Technical-detail
+// agent cards can never drift apart into two descriptions of the same four
+// agents.
+const AGENT_INFO = (() => {
+  const src = fs.readFileSync(path.join(REPO_ROOT, "dashboard/app.py"), "utf-8");
+  const block = src.match(/AGENT_INFO = \{([\s\S]*?)\n\}/);
+  if (!block) throw new Error("Couldn't find AGENT_INFO in dashboard/app.py -- has it moved or been renamed?");
+  const entryRe = /(\d+):\s*\{"name":\s*"([^"]+)",\s*"tool":\s*"([^"]+)",\s*"used_when":\s*"([^"]+)"\}/g;
+  const info = {};
+  for (const m of block[1].matchAll(entryRe)) {
+    info[m[1]] = { name: m[2], tool: m[3], used_when: m[4] };
+  }
+  if (Object.keys(info).length !== 4) throw new Error(`Expected 4 AGENT_INFO entries from dashboard/app.py, parsed ${Object.keys(info).length} -- regex may be stale against a reformatted dict.`);
+  return info;
+})();
+
 const TAXONOMY = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "reference_data/taxonomy/cfpb_taxonomy.json"), "utf-8"));
 const REGULATIONS = {
   "fdcpa_1692g": JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "reference_data/regulations/fdcpa_1692g.json"), "utf-8")),
@@ -965,6 +983,82 @@ function mergeNode({ id, name, position, notes }) {
   return node;
 }
 
+// Canvas annotation only, no data flow -- the two-row layout (Test path on
+// top, Product path on bottom) plus these labels is deliberately built for
+// on-camera clarity (a marketing recording walks the canvas from trigger to
+// end), not just internal documentation. UNVERIFIED AGAINST A LIVE N8N
+// INSTANCE, same flag as googleSheetsNode()/anthropicAgentNode(): the exact
+// color-number-to-hue mapping n8n's sticky note uses isn't confirmed here,
+// only that it's an integer 1-7. Confirm the colors read as intended on
+// import; the content and position are what actually matter.
+function stickyNoteNode({ id, name, position, width, height, color, content }) {
+  return {
+    parameters: { content, height, width, color },
+    id, name, type: "n8n-nodes-base.stickyNote", typeVersion: 1, position,
+  };
+}
+
+// Phase 7's real agent calls, kept deliberately as a plain n8n-nodes-base
+// .httpRequest node hitting Anthropic's Messages API directly -- NOT one of
+// n8n's LangChain AI Agent/Chat Model nodes. Three reasons: (1) httpRequest
+// is a node type this generator, the simulator, and a real live n8n import
+// have all already genuinely proven correct (see "CFPB Complaint Search"),
+// where the LangChain node family's exact parameter shape and connection
+// type (ai_languageModel, not main) would be new, unverified ground; (2) it
+// makes cost genuinely predictable -- exactly one Messages API call per
+// agent per ticket, no autonomous multi-turn tool-calling loop that could
+// silently consume extra calls; (3) the real "tools" here (taxonomy lookup,
+// regulation search, exact clause fetch, CRM reads) are deterministic reads
+// against this repo's own cached reference data, not things a hosted LLM
+// tool-call round-trip is needed for -- the agent's only job is to decide
+// WHETHER a ticket needs one and supply its own reasoning, exactly mirroring
+// the mock nodes' `agentN_tool_used` / `agentN_output` contract so every
+// downstream Tool/IF/Merge node (already real, already tested) needs zero
+// changes to consume real output instead of a fixture lookup.
+//
+// UNVERIFIED AGAINST A LIVE N8N INSTANCE, same honesty flag as
+// googleSheetsNode() below: the generic-header-auth parameter shape for
+// n8n-nodes-base.httpRequest is built to the best available knowledge, not
+// live-tested. Confirm the credential wiring on import.
+const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"; // cost-efficient; classification/extraction, not open-ended reasoning
+const ANTHROPIC_MAX_TOKENS = 1536;
+
+function anthropicAgentNode({ id, name, position, systemPrompt, notes }) {
+  const bodyExpr =
+    "={{ JSON.stringify({ model: " + JSON.stringify(ANTHROPIC_MODEL) +
+    ", max_tokens: " + ANTHROPIC_MAX_TOKENS +
+    ", system: " + JSON.stringify(systemPrompt) +
+    ", messages: [{ role: \"user\", content: JSON.stringify($json) + \"\\n\\nRespond with ONLY valid JSON matching the schema in the system prompt -- no prose, no markdown code fences.\" }] }) }}";
+  return {
+    parameters: {
+      method: "POST",
+      url: "https://api.anthropic.com/v1/messages",
+      authentication: "genericCredentialType",
+      genericAuthType: "httpHeaderAuth",
+      sendHeaders: true,
+      headerParameters: {
+        parameters: [
+          { name: "anthropic-version", value: "2023-06-01" },
+          { name: "content-type", value: "application/json" },
+        ],
+      },
+      sendBody: true,
+      specifyBody: "json",
+      jsonBody: bodyExpr,
+      options: {},
+    },
+    id, name, type: "n8n-nodes-base.httpRequest", typeVersion: 4.2, position,
+    credentials: {
+      httpHeaderAuth: {
+        id: "REPLACE_WITH_YOUR_ANTHROPIC_CREDENTIAL_ID",
+        name: "REPLACE_WITH_YOUR_ANTHROPIC_CREDENTIAL_NAME",
+      },
+    },
+    notesInFlow: true,
+    notes: notes || "",
+  };
+}
+
 // UNTESTED AGAINST A LIVE N8N INSTANCE. This project has no access to a
 // running n8n or Google Sheets credentials to import/execute against, so
 // this node's exact parameter shape (n8n's googleSheets node schema drifts
@@ -1313,22 +1407,139 @@ return {
 };
 `.trim();
 
-const jsLiveAwaitingPhase7 = `
-// Real ticket, real synthetic CRM (Phase 1/2 both genuinely ran) -- just no
-// agent decision, since Phase 3's mock agents only have fixture data for
-// Tickets A/B/C. Carries the real fields already computed upstream rather
-// than the bare complaint_id/product this used to return, so a dashboard
-// can show something useful for these instead of just a count -- still
-// zero fabricated reasoning: no severity, no draft, no escalation call.
-const t = $input.item.json;
+// ===========================================================================
+// Phase 7 -- the Product path. Real Anthropic API calls (see
+// anthropicAgentNode() above), replacing "Live Ticket (Awaiting Phase 7)":
+// once this path exists, a live ticket gets a genuine decision instead of a
+// dead end. Wired as a second, parallel chain alongside the Test path
+// (Load Fixture Tickets -> mock Agent 1-4), not in place of it -- the mock
+// chain stays exactly as it is, because it's the only thing that lets
+// scripts/simulate_workflow.mjs keep verifying the pipeline's wiring for
+// free. Each system prompt asks for the SAME field shape the mock nodes
+// already produce (agentN_tool_used / agentN_output), so every downstream
+// Tool/IF/Merge node -- already real, already tested -- needs no changes at
+// all to consume real agent output instead of a fixture lookup.
+// ===========================================================================
+
+const jsAgent1SystemPrompt = `You are Agent 1 (Classification) in a complaint-triage pipeline processing a real CFPB consumer complaint.
+
+Task: identify the substantive issue(s) the consumer is actually raising. When the narrative describes more than one issue, rank them by severity and substance -- NOT by how much narrative text each one occupies. (A known failure mode this pipeline was specifically built to avoid: an earlier draft classified a complaint by whichever issue had the most narrative text, a dropped phone call, instead of the issue the consumer had actually filed as substantive, an unauthorised account. Do not repeat that mistake.)
+
+Decide whether the taxonomy-lookup tool is needed: set tool_used=true ONLY when the narrative is genuinely ambiguous relative to the ticket's own filed category (its product/issue/sub_issue fields) -- not for clear, clean-match cases.
+
+Respond with ONLY this JSON shape, no other text:
+{
+  "tool_used": boolean,
+  "issues": [{ "issue": string, "severity": "Low" | "Medium" | "High", "confidence": number (0-1), "basis": string }],
+  "primary_issue": string
+}
+"issues" must have at least one entry. "primary_issue" must exactly match one entry's "issue" value -- the one you judge most substantive.`;
+
+const jsAgent2SystemPrompt = `You are Agent 2 (Research) in a complaint-triage pipeline. You receive a CFPB complaint ticket plus Agent 1's classification of it.
+
+Task: determine which federal regulation, if any, applies to this complaint and why, based on the narrative and the classified issue. Do not guess a citation you're not reasonably confident about -- it is genuinely fine to return null if nothing clearly applies; a downstream deterministic tool independently re-checks your claim against a real cached regulation corpus.
+
+Decide whether a broader CRM context pull (tenure, account tier, product holdings, balance, prior-complaint history) is warranted: set broader_crm_lookup_used=true when the customer relationship history seems relevant to responding appropriately (e.g. a repeat complainant, a high-value account, or the issue's nature calls for account context) -- this is discretionary, not automatic.
+
+Respond with ONLY this JSON shape, no other text:
+{
+  "broader_crm_lookup_used": boolean,
+  "applicable_regulation": string or null,
+  "citation": string or null,
+  "precedent_notes": string
+}`;
+
+const jsAgent3SystemPrompt = `You are Agent 3 (Drafting) in a complaint-triage pipeline. You receive a CFPB complaint ticket, Agent 1's classification, and Agent 2's research (applicable regulation and citation, if any).
+
+Task: draft a response to the consumer addressing their complaint substantively.
+
+Decide whether your draft cites a specific regulatory provision: set cites_regulation=true and cited_clause to the exact citation string ONLY when Agent 2 identified a specific citation AND it's appropriate to cite it in this response. When you do cite it, set tool_used=true so a downstream tool can fetch and verify the exact clause text you're relying on.
+
+Respond with ONLY this JSON shape, no other text:
+{
+  "tool_used": boolean,
+  "draft": string,
+  "cites_regulation": boolean,
+  "cited_clause": string or null
+}`;
+
+const jsAgent4SystemPrompt = `You are Agent 4 (QA / escalation-scoring) in a complaint-triage pipeline, the final check before a draft either goes out or gets escalated to a human.
+
+Task: review Agent 3's draft against Agent 2's cited regulation and the CRM record. Assess your confidence in the draft's factual accuracy (0-1), whether it requires human review before sending, and a concise reason for that judgment.
+
+Decide whether to re-verify a specific claim: set tool_used=true, and fill reverify_clause and/or reverify_crm_field, ONLY when the draft makes a checkable claim worth independently re-confirming (a cited regulation clause, and/or a specific CRM fact like tenure_years or prior_complaints_12mo). reverify_crm_field must be an exact CRM field name if set.
+
+Respond with ONLY this JSON shape, no other text:
+{
+  "tool_used": boolean,
+  "confidence": number (0-1),
+  "requires_human": boolean,
+  "reason": string,
+  "reverify_clause": string or null,
+  "reverify_crm_field": string or null
+}`;
+
+// Parses one Anthropic Messages API response and reshapes it into the exact
+// field names the (already real, already tested) downstream Tool/IF/Merge
+// nodes expect -- the same contract the mock Agent N nodes produce, so
+// nothing downstream needs to know or care whether this ticket's decision
+// came from a fixture lookup or a real model call. Defensive against Claude
+// wrapping its JSON in a markdown code fence despite being told not to.
+function parseAnthropicJson(apiResponse) {
+  const text = apiResponse.content?.[0]?.text || "";
+  const stripped = text.trim().replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "");
+  return JSON.parse(stripped);
+}
+
+const jsParseAgent1Response = `
+${parseAnthropicJson.toString()}
+
+const ticket = $input.item.json;
+const parsed = parseAnthropicJson(ticket);
+return { json: { ...ticket, agent1_tool_used: parsed.tool_used, agent1_output: { issues: parsed.issues, primary_issue: parsed.primary_issue } } };
+`.trim();
+
+const jsParseAgent2Response = `
+${parseAnthropicJson.toString()}
+
+const ticket = $input.item.json;
+const parsed = parseAnthropicJson(ticket);
 return {
   json: {
-    complaint_id: t.complaint_id, company: t.company, product: t.product, state: t.state,
-    issue: t.issue, sub_issue: t.sub_issue, tags: t.tags, date_received: t.date_received,
-    timely: t.timely, company_response: t.company_response,
-    crm_summary: t.crm ? { account_tier: t.crm.account_tier, tenure_years: t.crm.tenure_years, special_population_flag: t.crm.special_population_flag } : null,
-    decision: "AWAITING_PHASE_7",
-    note: "Live ticket -- no Phase 3 mock fixture exists for this complaint_id. Awaiting the real Claude API swap at Phase 7.",
+    ...ticket,
+    agent2_broader_crm_lookup_used: parsed.broader_crm_lookup_used,
+    agent2_output: { applicable_regulation: parsed.applicable_regulation, citation: parsed.citation, precedent_notes: parsed.precedent_notes },
+  },
+};
+`.trim();
+
+const jsParseAgent3Response = `
+${parseAnthropicJson.toString()}
+
+const ticket = $input.item.json;
+const parsed = parseAnthropicJson(ticket);
+return {
+  json: {
+    ...ticket,
+    agent3_tool_used: parsed.tool_used,
+    agent3_output: { draft: parsed.draft, cites_regulation: parsed.cites_regulation },
+    _agent3_cited_clause: parsed.cited_clause,
+  },
+};
+`.trim();
+
+const jsParseAgent4Response = `
+${parseAnthropicJson.toString()}
+
+const ticket = $input.item.json;
+const parsed = parseAnthropicJson(ticket);
+return {
+  json: {
+    ...ticket,
+    agent4_tool_used: parsed.tool_used,
+    agent4_output: { confidence: parsed.confidence, requires_human: parsed.requires_human, reason: parsed.reason },
+    _agent4_reverify_clause: parsed.reverify_clause,
+    _agent4_reverify_crm_field: parsed.reverify_crm_field,
   },
 };
 `.trim();
@@ -1351,7 +1562,68 @@ const nodes = [
   mergeNode({ id: "b2f7d3a1-0000-4000-8000-00000000001b", name: "Merge: Fixture or Live Tickets", position: [580, 60] }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000003", name: "Route: Fixture or Live?", mode: "runOnceForEachItem", jsCode: jsRouteFixtureOrLive, position: [740, 0] }),
   ifNode({ id: "b2f7d3a1-0000-4000-8000-000000000004", name: "IF: Is Fixture Ticket?", leftValueExpr: "={{ $json.is_fixture_ticket }}", position: [960, 0] }),
-  codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000005", name: "Live Ticket (Awaiting Phase 7)", mode: "runOnceForEachItem", jsCode: jsLiveAwaitingPhase7, position: [1180, 140], notes: "Terminal node for live (non-fixture) tickets. Phase 3's mock agents only cover Tickets A/B/C -- a real ticket needs the Phase 7 Claude API swap before it can be triaged." }),
+  // --- Product path (Phase 7): real Anthropic calls, replacing the old
+  // "Live Ticket (Awaiting Phase 7)" dead end. Runs in parallel with the
+  // Test path below, not instead of it -- see the comment above
+  // anthropicAgentNode() for why both stay. Bottom row of the canvas
+  // (positive Y), Test path stays the top row (negative Y), per the
+  // marketing-recording layout.
+  anthropicAgentNode({ id: "c3a8e4b2-0001-4000-8000-000000000001", name: "Real Agent 1: Classification", position: [1180, 400], systemPrompt: jsAgent1SystemPrompt, notes: "Real Claude API call (spec Section 15 Phase 7). Classifies the complaint's substantive issue(s) and decides whether the taxonomy tool is needed -- same contract as the mock Agent 1 node above." }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000002", name: "Parse: Real Agent 1 Response", mode: "runOnceForEachItem", jsCode: jsParseAgent1Response, position: [1300, 400] }),
+  ifNode({ id: "c3a8e4b2-0001-4000-8000-000000000003", name: "IF: Real Agent 1 Tool Used?", leftValueExpr: "={{ $json.agent1_tool_used }}", position: [1420, 400] }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000004", name: "Tool: Real CFPB Taxonomy Lookup", mode: "runOnceForEachItem", jsCode: jsTaxonomyTool, position: [1620, 520], notes: "Same real, deterministic taxonomy lookup as the Test path's tool -- reused verbatim, not duplicated logic (see jsTaxonomyTool)." }),
+  mergeNode({ id: "c3a8e4b2-0001-4000-8000-000000000005", name: "Merge: Pre-Real Agent 2", position: [1740, 400] }),
+
+  anthropicAgentNode({ id: "c3a8e4b2-0001-4000-8000-000000000006", name: "Real Agent 2: Research", position: [1860, 400], systemPrompt: jsAgent2SystemPrompt, notes: "Real Claude API call. Determines the applicable regulation (if any) and whether broader CRM context is warranted." }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000007", name: "Parse: Real Agent 2 Response", mode: "runOnceForEachItem", jsCode: jsParseAgent2Response, position: [1980, 400] }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000008", name: "Tool: Real Special Population Check", mode: "runOnceForEachItem", jsCode: jsSpecialPopulationTool, position: [2100, 400], notes: "Always runs, every ticket -- same deterministic CRM read as the Test path's tool." }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000009", name: "Tool: Real Regulation Index Lookup", mode: "runOnceForEachItem", jsCode: jsRegulationIndexTool, position: [2280, 400], notes: "Always runs -- independently cross-checks Real Agent 2's own regulation claim against the real cached corpus." }),
+  ifNode({ id: "c3a8e4b2-0001-4000-8000-00000000000a", name: "IF: Real Agent 2 Broader CRM Lookup Used?", leftValueExpr: "={{ $json.agent2_broader_crm_lookup_used }}", position: [2460, 400] }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-00000000000b", name: "Tool: Real CRM Broader Context Lookup", mode: "runOnceForEachItem", jsCode: jsCrmBroaderTool, position: [2720, 520] }),
+  mergeNode({ id: "c3a8e4b2-0001-4000-8000-00000000000c", name: "Merge: Pre-Real Agent 3", position: [2840, 400] }),
+
+  anthropicAgentNode({ id: "c3a8e4b2-0001-4000-8000-00000000000d", name: "Real Agent 3: Drafting", position: [2960, 400], systemPrompt: jsAgent3SystemPrompt, notes: "Real Claude API call. Drafts the response and decides whether it cites a specific regulatory provision." }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-00000000000e", name: "Parse: Real Agent 3 Response", mode: "runOnceForEachItem", jsCode: jsParseAgent3Response, position: [3080, 400] }),
+  ifNode({ id: "c3a8e4b2-0001-4000-8000-00000000000f", name: "IF: Real Agent 3 Tool Used?", leftValueExpr: "={{ $json.agent3_tool_used }}", position: [3200, 400] }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000010", name: "Tool: Real Exact Regulation Clause Fetch", mode: "runOnceForEachItem", jsCode: jsClauseFetchTool, position: [3380, 520] }),
+  mergeNode({ id: "c3a8e4b2-0001-4000-8000-000000000011", name: "Merge: Pre-Real Agent 4", position: [3500, 400] }),
+
+  anthropicAgentNode({ id: "c3a8e4b2-0001-4000-8000-000000000012", name: "Real Agent 4: QA / Escalation-Scoring", position: [3620, 400], systemPrompt: jsAgent4SystemPrompt, notes: "Real Claude API call, the final check before a draft ships or escalates. Assesses confidence and whether human review is required." }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000013", name: "Parse: Real Agent 4 Response", mode: "runOnceForEachItem", jsCode: jsParseAgent4Response, position: [3740, 400] }),
+  ifNode({ id: "c3a8e4b2-0001-4000-8000-000000000014", name: "IF: Real Agent 4 Tool Used?", leftValueExpr: "={{ $json.agent4_tool_used }}", position: [3860, 400] }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000015", name: "Tool: Real Re-verify Clause & CRM Fact", mode: "runOnceForEachItem", jsCode: jsReverifyTool, position: [4040, 520] }),
+  mergeNode({ id: "c3a8e4b2-0001-4000-8000-000000000016", name: "Merge: Pre-Real Escalation Signals", position: [4160, 400] }),
+
+  // Both rows converge here -- the escalation math, ground-truth comparison,
+  // and Sheets write are pure, agent-source-agnostic logic (spec Section
+  // 7/8/11), so there's no reason to duplicate them: one shared tail fed by
+  // both the Test path's and Product path's finished records.
+  mergeNode({ id: "c3a8e4b2-0001-4000-8000-000000000017", name: "Merge: Test/Product Final", position: [4200, 130] }),
+
+  // --- Canvas labels (pure annotation, no data flow) -- built for the
+  // marketing recording: row labels distinguishing Test path (top) from
+  // Product path (bottom), plus the 4 agent-role cards mirroring the
+  // dashboard's own Technical-detail tab, sourced from AGENT_INFO above so
+  // the two descriptions can never drift apart.
+  stickyNoteNode({
+    id: "c3a8e4b2-0002-4000-8000-000000000001", name: "Sticky: Test Path Label",
+    position: [560, -260], width: 340, height: 160, color: 4,
+    content: "## 🧪 Test Path\nFixture-driven, zero API cost — verifies the pipeline's wiring and logic without spending real Claude credits.",
+  }),
+  stickyNoteNode({
+    id: "c3a8e4b2-0002-4000-8000-000000000002", name: "Sticky: Product Path Label",
+    position: [560, 320], width: 340, height: 160, color: 6,
+    content: "## 🚀 Product Path\nReal CFPB tickets, real Claude API calls — this is what actually runs on the live schedule.",
+  }),
+  ...[1, 2, 3, 4].map((num, i) => {
+    const info = AGENT_INFO[num];
+    const xByAgent = [1180, 1860, 2960, 3620];
+    return stickyNoteNode({
+      id: `c3a8e4b2-0002-4000-8000-00000000000${num + 2}`, name: `Sticky: Agent ${num} Role Card`,
+      position: [xByAgent[i], 210], width: 260, height: 160, color: 6,
+      content: `## Agent ${num}: ${info.name}\n**Tool:** ${info.tool}\n**Used when:** ${info.used_when}`,
+    });
+  }),
 
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000006", name: "Agent 1: Mock Classification Decision", mode: "runOnceForEachItem", jsCode: jsAgent1Decision, position: [1180, -140] }),
   ifNode({ id: "b2f7d3a1-0000-4000-8000-000000000007", name: "IF: Agent 1 Tool Used?", leftValueExpr: "={{ $json.agent1_tool_used }}", position: [1400, -140], notes: "Conditional tool-use, made visible: Agent 1 only calls the taxonomy lookup when the narrative is ambiguous relative to the filed category (spec Section 6). Clean-match tickets (A, B) skip it." }),
@@ -1394,9 +1666,49 @@ const connections = [
   { from: "Generate Synthetic CRM Record", to: "Merge: Fixture or Live Tickets", toInput: 1 },
   connect("Merge: Fixture or Live Tickets", "Route: Fixture or Live?"),
   connect("Route: Fixture or Live?", "IF: Is Fixture Ticket?"),
-  // IF outputs: index 0 = true, index 1 = false
+  // IF outputs: index 0 = true, index 1 = false. False (a genuinely live,
+  // non-fixture ticket) now goes to the Product path's Real Agent 1 instead
+  // of dead-ending at "Live Ticket (Awaiting Phase 7)" -- that placeholder
+  // is exactly what this phase replaces.
   { from: "IF: Is Fixture Ticket?", to: "Agent 1: Mock Classification Decision", fromOutput: 0 },
-  { from: "IF: Is Fixture Ticket?", to: "Live Ticket (Awaiting Phase 7)", fromOutput: 1 },
+  { from: "IF: Is Fixture Ticket?", to: "Real Agent 1: Classification", fromOutput: 1 },
+
+  // --- Product path (Phase 7): mirrors the Test path's shape exactly, one
+  // real Anthropic call per agent instead of a fixture lookup, its own
+  // duplicate Tool/IF/Merge instances (see the comment above the node
+  // definitions for why duplicated rather than shared) -- converges back
+  // into the shared tail via "Merge: Test/Product Final" below.
+  { from: "Real Agent 1: Classification", to: "Parse: Real Agent 1 Response", fromOutput: 0 },
+  { from: "Parse: Real Agent 1 Response", to: "IF: Real Agent 1 Tool Used?", fromOutput: 0 },
+  { from: "IF: Real Agent 1 Tool Used?", to: "Tool: Real CFPB Taxonomy Lookup", fromOutput: 0 },
+  { from: "Tool: Real CFPB Taxonomy Lookup", to: "Merge: Pre-Real Agent 2", fromOutput: 0, toInput: 0 },
+  { from: "IF: Real Agent 1 Tool Used?", to: "Merge: Pre-Real Agent 2", fromOutput: 1, toInput: 1 },
+  connect("Merge: Pre-Real Agent 2", "Real Agent 2: Research"),
+
+  { from: "Real Agent 2: Research", to: "Parse: Real Agent 2 Response", fromOutput: 0 },
+  { from: "Parse: Real Agent 2 Response", to: "Tool: Real Special Population Check", fromOutput: 0 },
+  { from: "Tool: Real Special Population Check", to: "Tool: Real Regulation Index Lookup", fromOutput: 0 },
+  { from: "Tool: Real Regulation Index Lookup", to: "IF: Real Agent 2 Broader CRM Lookup Used?", fromOutput: 0 },
+  { from: "IF: Real Agent 2 Broader CRM Lookup Used?", to: "Tool: Real CRM Broader Context Lookup", fromOutput: 0 },
+  { from: "Tool: Real CRM Broader Context Lookup", to: "Merge: Pre-Real Agent 3", fromOutput: 0, toInput: 0 },
+  { from: "IF: Real Agent 2 Broader CRM Lookup Used?", to: "Merge: Pre-Real Agent 3", fromOutput: 1, toInput: 1 },
+  connect("Merge: Pre-Real Agent 3", "Real Agent 3: Drafting"),
+
+  { from: "Real Agent 3: Drafting", to: "Parse: Real Agent 3 Response", fromOutput: 0 },
+  { from: "Parse: Real Agent 3 Response", to: "IF: Real Agent 3 Tool Used?", fromOutput: 0 },
+  { from: "IF: Real Agent 3 Tool Used?", to: "Tool: Real Exact Regulation Clause Fetch", fromOutput: 0 },
+  { from: "Tool: Real Exact Regulation Clause Fetch", to: "Merge: Pre-Real Agent 4", fromOutput: 0, toInput: 0 },
+  { from: "IF: Real Agent 3 Tool Used?", to: "Merge: Pre-Real Agent 4", fromOutput: 1, toInput: 1 },
+  connect("Merge: Pre-Real Agent 4", "Real Agent 4: QA / Escalation-Scoring"),
+
+  { from: "Real Agent 4: QA / Escalation-Scoring", to: "Parse: Real Agent 4 Response", fromOutput: 0 },
+  { from: "Parse: Real Agent 4 Response", to: "IF: Real Agent 4 Tool Used?", fromOutput: 0 },
+  { from: "IF: Real Agent 4 Tool Used?", to: "Tool: Real Re-verify Clause & CRM Fact", fromOutput: 0 },
+  { from: "Tool: Real Re-verify Clause & CRM Fact", to: "Merge: Pre-Real Escalation Signals", fromOutput: 0, toInput: 0 },
+  { from: "IF: Real Agent 4 Tool Used?", to: "Merge: Pre-Real Escalation Signals", fromOutput: 1, toInput: 1 },
+  connect("Merge: Pre-Real Escalation Signals", "Merge: Test/Product Final"),
+  { from: "Merge: Pre-Escalation Signals", to: "Merge: Test/Product Final", fromOutput: 0, toInput: 1 },
+  connect("Merge: Test/Product Final", "Compute Escalation Signals"),
 
   { from: "Agent 1: Mock Classification Decision", to: "IF: Agent 1 Tool Used?", fromOutput: 0 },
   { from: "IF: Agent 1 Tool Used?", to: "Tool: CFPB Taxonomy Lookup", fromOutput: 0 },
@@ -1422,7 +1734,10 @@ const connections = [
   { from: "IF: Agent 4 Tool Used?", to: "Tool: Re-verify Clause & CRM Fact", fromOutput: 0 },
   { from: "Tool: Re-verify Clause & CRM Fact", to: "Merge: Pre-Escalation Signals", fromOutput: 0, toInput: 0 },
   { from: "IF: Agent 4 Tool Used?", to: "Merge: Pre-Escalation Signals", fromOutput: 1, toInput: 1 },
-  connect("Merge: Pre-Escalation Signals", "Compute Escalation Signals"),
+  // NOTE: "Merge: Pre-Escalation Signals" feeds "Merge: Test/Product Final"
+  // (wired above, in the Product path block), not directly into "Compute
+  // Escalation Signals" -- that shared merge is what combines this Test
+  // path's final output with the Product path's.
 
   { from: "Compute Escalation Signals", to: "Compute Ground-Truth Agreement", fromOutput: 0 },
   { from: "Compute Ground-Truth Agreement", to: "IF: Escalate?", fromOutput: 0 },
