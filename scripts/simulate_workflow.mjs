@@ -80,6 +80,13 @@ function runIfNode(node, items) {
   return [items.filter((it) => it[field] === true), items.filter((it) => it[field] !== true)];
 }
 
+// Concatenates whatever's been buffered on each of a Merge node's expected
+// input indices, in ascending index order -- matches n8n's "Append" mode
+// (plain concatenation, no field matching).
+function runMergeNode(buffers, expectedIndices) {
+  return [...expectedIndices].sort((a, b) => a - b).flatMap((i) => buffers[i] || []);
+}
+
 /**
  * Execute starting from a given node, following connections.
  *
@@ -92,30 +99,92 @@ function runIfNode(node, items) {
  *     outgoing connection -- the actual end-of-graph results.
  * Most callers want `trace` for a specific node's rich output shape;
  * `terminal` is for "what came out the end of the whole graph."
+ *
+ * Merge nodes (n8n-nodes-base.merge, "append" mode) need to know which of
+ * their input ports to actually wait for: a Merge node fed by a genuinely
+ * unreachable branch in THIS run (e.g. the live-fetch branch when starting
+ * from the fixture harness, or vice versa -- see build_workflow.js's
+ * mergeNode() comment) must not wait forever for a delivery that will never
+ * come. Reachability is computed once, per call, by a plain forward graph
+ * walk from startNodeName -- independent of node-type semantics, so it's
+ * accurate regardless of which node this particular call starts from.
  */
 export async function execute(startNodeName, initialItems) {
   const trace = {};
   const terminal = {};
   const staticDataStore = {};
-  const queue = [[startNodeName, initialItems]];
+
+  const reachable = new Set([startNodeName]);
+  {
+    const stack = [startNodeName];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      for (const outArr of (workflow.connections[n] || { main: [] }).main) {
+        for (const c of outArr || []) {
+          if (!reachable.has(c.node)) { reachable.add(c.node); stack.push(c.node); }
+        }
+      }
+    }
+  }
+  // nodeName -> [target input index, ...] for every incoming edge whose
+  // source is reachable in this run.
+  const incomingReachable = {};
+  for (const [from, conn] of Object.entries(workflow.connections)) {
+    if (!reachable.has(from)) continue;
+    for (const outArr of conn.main || []) {
+      for (const c of outArr || []) {
+        (incomingReachable[c.node] ||= []).push(c.index ?? 0);
+      }
+    }
+  }
+  const mergeBuffers = {}; // nodeName -> { inputIndex: items[] }
+  const mergeEmitted = new Set();
+
+  const queue = [[startNodeName, initialItems, 0]];
 
   while (queue.length > 0) {
-    const [nodeName, items] = queue.shift();
-    if (items.length === 0) continue;
+    const [nodeName, items, targetIndex] = queue.shift();
     const node = nodesByName[nodeName];
     if (!node) throw new Error(`Unknown node in connections: ${nodeName}`);
-
     const outgoing = (workflow.connections[nodeName] || { main: [] }).main;
 
+    if (node.type === "n8n-nodes-base.merge") {
+      // Register this delivery -- even an empty one, since "the branch ran
+      // and produced nothing" is a real, complete delivery, not "hasn't
+      // arrived yet." A node upstream of a Merge must always be allowed to
+      // deliver zero items (see the removed blanket empty-items skip below).
+      const buf = (mergeBuffers[nodeName] ||= {});
+      buf[targetIndex] = (buf[targetIndex] || []).concat(items);
+      const expected = new Set(incomingReachable[nodeName] || [0]);
+      const gotAll = [...expected].every((i) => buf[i] !== undefined);
+      if (!gotAll || mergeEmitted.has(nodeName)) continue;
+      mergeEmitted.add(nodeName);
+      const outItems = runMergeNode(buf, expected);
+      trace[nodeName] = (trace[nodeName] || []).concat(outItems);
+      if (!outgoing[0] || outgoing[0].length === 0) {
+        terminal[nodeName] = (terminal[nodeName] || []).concat(outItems);
+      } else {
+        for (const conn of outgoing[0]) queue.push([conn.node, outItems, conn.index ?? 0]);
+      }
+      continue;
+    }
+
+    // Every other node type is a no-op on zero items, EXCEPT httpRequest
+    // (a real network call -- skip rather than fire with empty params) and
+    // Merge (handled above, since it needs to see empty deliveries too).
+    if (items.length === 0 && node.type !== "n8n-nodes-base.if" && node.type !== "n8n-nodes-base.code") {
+      continue;
+    }
+
     if (node.type === "n8n-nodes-base.manualTrigger" || node.type === "n8n-nodes-base.scheduleTrigger") {
-      for (const conn of outgoing[0] || []) queue.push([conn.node, items]);
+      for (const conn of outgoing[0] || []) queue.push([conn.node, items, conn.index ?? 0]);
       continue;
     }
     if (node.type === "n8n-nodes-base.if") {
       const [trueItems, falseItems] = runIfNode(node, items);
       trace[nodeName] = (trace[nodeName] || []).concat(trueItems, falseItems);
-      for (const conn of outgoing[0] || []) queue.push([conn.node, trueItems]);
-      for (const conn of outgoing[1] || []) queue.push([conn.node, falseItems]);
+      for (const conn of outgoing[0] || []) queue.push([conn.node, trueItems, conn.index ?? 0]);
+      for (const conn of outgoing[1] || []) queue.push([conn.node, falseItems, conn.index ?? 0]);
       continue;
     }
     if (node.type === "n8n-nodes-base.code") {
@@ -124,7 +193,7 @@ export async function execute(startNodeName, initialItems) {
       if (!outgoing[0] || outgoing[0].length === 0) {
         terminal[nodeName] = (terminal[nodeName] || []).concat(outItems);
       } else {
-        for (const conn of outgoing[0]) queue.push([conn.node, outItems]);
+        for (const conn of outgoing[0]) queue.push([conn.node, outItems, conn.index ?? 0]);
       }
       continue;
     }
@@ -134,7 +203,7 @@ export async function execute(startNodeName, initialItems) {
       if (!outgoing[0] || outgoing[0].length === 0) {
         terminal[nodeName] = (terminal[nodeName] || []).concat(outItems);
       } else {
-        for (const conn of outgoing[0]) queue.push([conn.node, outItems]);
+        for (const conn of outgoing[0]) queue.push([conn.node, outItems, conn.index ?? 0]);
       }
       continue;
     }

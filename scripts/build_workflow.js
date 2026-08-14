@@ -941,6 +941,30 @@ function ifNode({ id, name, leftValueExpr, position, notes }) {
   return node;
 }
 
+// Combines two branches that converge on a shared downstream node back into
+// a single stream, using n8n's native Merge node ("Append" mode -- plain
+// concatenation, no field matching) instead of wiring both branches
+// straight into the same input port. That naive-wiring pattern is what this
+// workflow used everywhere until this fix: it happens to work for a real,
+// single, trigger-fired production execution (both branches genuinely run
+// and n8n's engine correctly combines whatever arrives at a shared input),
+// but it silently only carries forward ONE of the two branches during
+// manual/partial per-node "Execute step" testing in the n8n UI -- discovered
+// the hard way while backfilling the real Google Sheet by hand, where each
+// merge point had to be fixed by manually pinning the correct branch's
+// cached output before continuing. An explicit Merge node fixes both cases
+// at once: it's designed to combine multiple inputs regardless of whether
+// they arrive in the same execution pass or were separately re-run, so
+// manual per-node testing now behaves the same as a real trigger-fired run.
+function mergeNode({ id, name, position, notes }) {
+  const node = {
+    parameters: { mode: "append", numberInputs: 2 },
+    id, name, type: "n8n-nodes-base.merge", typeVersion: 3.1, position,
+  };
+  if (notes) { node.notesInFlow = true; node.notes = notes; }
+  return node;
+}
+
 // UNTESTED AGAINST A LIVE N8N INSTANCE. This project has no access to a
 // running n8n or Google Sheets credentials to import/execute against, so
 // this node's exact parameter shape (n8n's googleSheets node schema drifts
@@ -1324,6 +1348,7 @@ return { json: flattenForSheets(record) };
 // --- Assemble nodes ---
 const nodes = [
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000002", name: "Load Fixture Tickets", mode: "runOnceForAllItems", jsCode: jsLoadFixtureTickets, position: [-400, 320], notes: "Phase 3 test harness: injects the literal Section 3a/3c Ticket A/B/C fixtures, bypassing the live CFPB fetch and random CRM generation entirely. Its own entry point -- no dedicated trigger node (see the code comment on jsLoadFixtureTickets); run it directly via n8n's \"Execute step\"." }),
+  mergeNode({ id: "b2f7d3a1-0000-4000-8000-00000000001b", name: "Merge: Fixture or Live Tickets", position: [580, 60] }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000003", name: "Route: Fixture or Live?", mode: "runOnceForEachItem", jsCode: jsRouteFixtureOrLive, position: [740, 0] }),
   ifNode({ id: "b2f7d3a1-0000-4000-8000-000000000004", name: "IF: Is Fixture Ticket?", leftValueExpr: "={{ $json.is_fixture_ticket }}", position: [960, 0] }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000005", name: "Live Ticket (Awaiting Phase 7)", mode: "runOnceForEachItem", jsCode: jsLiveAwaitingPhase7, position: [1180, 140], notes: "Terminal node for live (non-fixture) tickets. Phase 3's mock agents only cover Tickets A/B/C -- a real ticket needs the Phase 7 Claude API swap before it can be triaged." }),
@@ -1331,33 +1356,43 @@ const nodes = [
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000006", name: "Agent 1: Mock Classification Decision", mode: "runOnceForEachItem", jsCode: jsAgent1Decision, position: [1180, -140] }),
   ifNode({ id: "b2f7d3a1-0000-4000-8000-000000000007", name: "IF: Agent 1 Tool Used?", leftValueExpr: "={{ $json.agent1_tool_used }}", position: [1400, -140], notes: "Conditional tool-use, made visible: Agent 1 only calls the taxonomy lookup when the narrative is ambiguous relative to the filed category (spec Section 6). Clean-match tickets (A, B) skip it." }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000008", name: "Tool: CFPB Taxonomy Lookup", mode: "runOnceForEachItem", jsCode: jsTaxonomyTool, position: [1620, -260] }),
+  mergeNode({ id: "b2f7d3a1-0000-4000-8000-00000000001c", name: "Merge: Pre-Agent 2", position: [1720, -140] }),
 
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000009", name: "Agent 2: Mock Research Decision", mode: "runOnceForEachItem", jsCode: jsAgent2Decision, position: [1840, -140] }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-00000000000a", name: "Tool: Special Population Check", mode: "runOnceForEachItem", jsCode: jsSpecialPopulationTool, position: [2060, -140], notes: "Always runs, every ticket (spec v5) -- deterministic, not discretionary." }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-00000000000b", name: "Tool: Regulation Index Lookup", mode: "runOnceForEachItem", jsCode: jsRegulationIndexTool, position: [2280, -140], notes: "Always runs, based on classification (spec Section 6)." }),
   ifNode({ id: "b2f7d3a1-0000-4000-8000-00000000000c", name: "IF: Agent 2 Broader CRM Lookup Used?", leftValueExpr: "={{ $json.agent2_broader_crm_lookup_used }}", position: [2500, -140], notes: "Discretionary tier (spec v5): tenure/balance/prior-complaint context, only pulled when relevant. Known gap: all three Phase 3 fixtures warrant this lookup, so the false branch is structurally present but untested here -- spec's own flagged Phase 7 verification item." }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-00000000000d", name: "Tool: CRM Broader Context Lookup", mode: "runOnceForEachItem", jsCode: jsCrmBroaderTool, position: [2720, -260] }),
+  mergeNode({ id: "b2f7d3a1-0000-4000-8000-00000000001d", name: "Merge: Pre-Agent 3", position: [2820, -140] }),
 
   codeNode({ id: "b2f7d3a1-0000-4000-8000-00000000000e", name: "Agent 3: Mock Drafting Decision", mode: "runOnceForEachItem", jsCode: jsAgent3Decision, position: [2940, -140] }),
   ifNode({ id: "b2f7d3a1-0000-4000-8000-00000000000f", name: "IF: Agent 3 Tool Used?", leftValueExpr: "={{ $json.agent3_tool_used }}", position: [3160, -140], notes: "Only when citing a specific provision (spec Section 6). Untested false branch: all three fixtures cite a regulation." }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000010", name: "Tool: Exact Regulation Clause Fetch", mode: "runOnceForEachItem", jsCode: jsClauseFetchTool, position: [3380, -260] }),
+  mergeNode({ id: "b2f7d3a1-0000-4000-8000-00000000001e", name: "Merge: Pre-Agent 4", position: [3480, -140] }),
 
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000011", name: "Agent 4: Mock QA Decision", mode: "runOnceForEachItem", jsCode: jsAgent4Decision, position: [3600, -140] }),
   ifNode({ id: "b2f7d3a1-0000-4000-8000-000000000012", name: "IF: Agent 4 Tool Used?", leftValueExpr: "={{ $json.agent4_tool_used }}", position: [3820, -140], notes: "Only when the draft makes a checkable claim (spec Section 6). Untested false branch: all three fixtures make one." }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000013", name: "Tool: Re-verify Clause & CRM Fact", mode: "runOnceForEachItem", jsCode: jsReverifyTool, position: [4040, -260] }),
+  mergeNode({ id: "b2f7d3a1-0000-4000-8000-00000000001f", name: "Merge: Pre-Escalation Signals", position: [4140, -140] }),
 
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000014", name: "Compute Escalation Signals", mode: "runOnceForEachItem", jsCode: jsComputeEscalationSignals, position: [4260, -140] }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000018", name: "Compute Ground-Truth Agreement", mode: "runOnceForEachItem", jsCode: jsComputeGroundTruthAgreement, position: [4480, -140], notes: "Phase 5 (spec Section 8): compares the pipeline's decision against CFPB's own outcome fields. Only company_response and timely exist in the live API -- disputed flag is confirmed unavailable, not silently dropped. Reported as a directional agreement signal, never accuracy." }),
   ifNode({ id: "b2f7d3a1-0000-4000-8000-000000000015", name: "IF: Escalate?", leftValueExpr: "={{ $json.escalate }}", position: [4700, -140], notes: "Deterministic gate (spec Section 7) -- compound OR over five independent signals computed upstream, not a fifth agent call." }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000016", name: "Final: Escalate to Human Queue", mode: "runOnceForEachItem", jsCode: jsFinalEscalate, position: [4920, -260] }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000017", name: "Final: Auto-Resolve", mode: "runOnceForEachItem", jsCode: jsFinalAutoResolve, position: [4920, -20] }),
+  mergeNode({ id: "b2f7d3a1-0000-4000-8000-000000000020", name: "Merge: Final Decision Rows", position: [5030, -140] }),
   codeNode({ id: "b2f7d3a1-0000-4000-8000-000000000019", name: "Prepare Row for Google Sheets", mode: "runOnceForEachItem", jsCode: jsPrepareRowForSheets, position: [5140, -140], notes: "Flattens either final-record shape into single-level columns. complaint_id is the dedup key the next node matches on." }),
   googleSheetsNode({ id: "b2f7d3a1-0000-4000-8000-00000000001a", name: "Google Sheets: Log Decision", position: [5360, -140], notes: "Spec Section 11 -- Append-or-Update, matchingColumns=[complaint_id]. This is the actual dedup mechanism for the date-level watermark overlap noted since Phase 1: a re-processed complaint_id updates its existing row rather than duplicating it. REPLACE the documentId/sheetName/credentials placeholders before running -- untested against live n8n/Sheets, see the code comment above googleSheetsNode()." }),
 ];
 
 const connections = [
-  connect("Load Fixture Tickets", "Route: Fixture or Live?"),
-  connect("Generate Synthetic CRM Record", "Route: Fixture or Live?"),
+  // Every point below where two branches converge on a shared downstream
+  // node goes through an explicit Merge node (mode "append") instead of
+  // wiring both branches straight into the same input port -- see the
+  // comment above mergeNode() for why.
+  { from: "Load Fixture Tickets", to: "Merge: Fixture or Live Tickets", toInput: 0 },
+  { from: "Generate Synthetic CRM Record", to: "Merge: Fixture or Live Tickets", toInput: 1 },
+  connect("Merge: Fixture or Live Tickets", "Route: Fixture or Live?"),
   connect("Route: Fixture or Live?", "IF: Is Fixture Ticket?"),
   // IF outputs: index 0 = true, index 1 = false
   { from: "IF: Is Fixture Ticket?", to: "Agent 1: Mock Classification Decision", fromOutput: 0 },
@@ -1365,33 +1400,38 @@ const connections = [
 
   { from: "Agent 1: Mock Classification Decision", to: "IF: Agent 1 Tool Used?", fromOutput: 0 },
   { from: "IF: Agent 1 Tool Used?", to: "Tool: CFPB Taxonomy Lookup", fromOutput: 0 },
-  { from: "Tool: CFPB Taxonomy Lookup", to: "Agent 2: Mock Research Decision", fromOutput: 0 },
-  { from: "IF: Agent 1 Tool Used?", to: "Agent 2: Mock Research Decision", fromOutput: 1 },
+  { from: "Tool: CFPB Taxonomy Lookup", to: "Merge: Pre-Agent 2", fromOutput: 0, toInput: 0 },
+  { from: "IF: Agent 1 Tool Used?", to: "Merge: Pre-Agent 2", fromOutput: 1, toInput: 1 },
+  connect("Merge: Pre-Agent 2", "Agent 2: Mock Research Decision"),
 
   { from: "Agent 2: Mock Research Decision", to: "Tool: Special Population Check", fromOutput: 0 },
   { from: "Tool: Special Population Check", to: "Tool: Regulation Index Lookup", fromOutput: 0 },
   { from: "Tool: Regulation Index Lookup", to: "IF: Agent 2 Broader CRM Lookup Used?", fromOutput: 0 },
   { from: "IF: Agent 2 Broader CRM Lookup Used?", to: "Tool: CRM Broader Context Lookup", fromOutput: 0 },
-  { from: "Tool: CRM Broader Context Lookup", to: "Agent 3: Mock Drafting Decision", fromOutput: 0 },
-  { from: "IF: Agent 2 Broader CRM Lookup Used?", to: "Agent 3: Mock Drafting Decision", fromOutput: 1 },
+  { from: "Tool: CRM Broader Context Lookup", to: "Merge: Pre-Agent 3", fromOutput: 0, toInput: 0 },
+  { from: "IF: Agent 2 Broader CRM Lookup Used?", to: "Merge: Pre-Agent 3", fromOutput: 1, toInput: 1 },
+  connect("Merge: Pre-Agent 3", "Agent 3: Mock Drafting Decision"),
 
   { from: "Agent 3: Mock Drafting Decision", to: "IF: Agent 3 Tool Used?", fromOutput: 0 },
   { from: "IF: Agent 3 Tool Used?", to: "Tool: Exact Regulation Clause Fetch", fromOutput: 0 },
-  { from: "Tool: Exact Regulation Clause Fetch", to: "Agent 4: Mock QA Decision", fromOutput: 0 },
-  { from: "IF: Agent 3 Tool Used?", to: "Agent 4: Mock QA Decision", fromOutput: 1 },
+  { from: "Tool: Exact Regulation Clause Fetch", to: "Merge: Pre-Agent 4", fromOutput: 0, toInput: 0 },
+  { from: "IF: Agent 3 Tool Used?", to: "Merge: Pre-Agent 4", fromOutput: 1, toInput: 1 },
+  connect("Merge: Pre-Agent 4", "Agent 4: Mock QA Decision"),
 
   { from: "Agent 4: Mock QA Decision", to: "IF: Agent 4 Tool Used?", fromOutput: 0 },
   { from: "IF: Agent 4 Tool Used?", to: "Tool: Re-verify Clause & CRM Fact", fromOutput: 0 },
-  { from: "Tool: Re-verify Clause & CRM Fact", to: "Compute Escalation Signals", fromOutput: 0 },
-  { from: "IF: Agent 4 Tool Used?", to: "Compute Escalation Signals", fromOutput: 1 },
+  { from: "Tool: Re-verify Clause & CRM Fact", to: "Merge: Pre-Escalation Signals", fromOutput: 0, toInput: 0 },
+  { from: "IF: Agent 4 Tool Used?", to: "Merge: Pre-Escalation Signals", fromOutput: 1, toInput: 1 },
+  connect("Merge: Pre-Escalation Signals", "Compute Escalation Signals"),
 
   { from: "Compute Escalation Signals", to: "Compute Ground-Truth Agreement", fromOutput: 0 },
   { from: "Compute Ground-Truth Agreement", to: "IF: Escalate?", fromOutput: 0 },
   { from: "IF: Escalate?", to: "Final: Escalate to Human Queue", fromOutput: 0 },
   { from: "IF: Escalate?", to: "Final: Auto-Resolve", fromOutput: 1 },
 
-  { from: "Final: Escalate to Human Queue", to: "Prepare Row for Google Sheets", fromOutput: 0 },
-  { from: "Final: Auto-Resolve", to: "Prepare Row for Google Sheets", fromOutput: 0 },
+  { from: "Final: Escalate to Human Queue", to: "Merge: Final Decision Rows", fromOutput: 0, toInput: 0 },
+  { from: "Final: Auto-Resolve", to: "Merge: Final Decision Rows", fromOutput: 0, toInput: 1 },
+  connect("Merge: Final Decision Rows", "Prepare Row for Google Sheets"),
   { from: "Prepare Row for Google Sheets", to: "Google Sheets: Log Decision", fromOutput: 0 },
 ];
 
@@ -1453,7 +1493,10 @@ function main() {
     if (!workflow.connections[c.from]) workflow.connections[c.from] = { main: [] };
     const outputIdx = c.fromOutput || 0;
     while (workflow.connections[c.from].main.length <= outputIdx) workflow.connections[c.from].main.push([]);
-    workflow.connections[c.from].main[outputIdx].push({ node: c.to, type: "main", index: 0 });
+    // c.toInput selects which of the TARGET node's own input ports this
+    // connection feeds -- only meaningful for Merge nodes (two distinct
+    // ports to combine), 0 for everything else.
+    workflow.connections[c.from].main[outputIdx].push({ node: c.to, type: "main", index: c.toInput || 0 });
   }
 
   fs.writeFileSync(WORKFLOW_PATH, JSON.stringify(workflow, null, 2) + "\n", "utf-8");

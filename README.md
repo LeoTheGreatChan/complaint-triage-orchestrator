@@ -150,6 +150,19 @@ belongs to the storage layer (Google Sheets Append-or-Update). **Resolved:** see
 2. No credentials required — the CFPB API is public and unauthenticated.
 3. Run **Manual Trigger** once to test end-to-end before activating the schedule.
 
+**Re-importing into an existing installation (e.g. after the Merge-node retrofit
+below):** n8n's Import from File/URL *pastes into the current canvas* rather than
+replacing it — importing on top of an already-populated workflow duplicates every
+node instead of updating it in place. To pick up structural changes safely:
+1. Create a brand-new, empty workflow in n8n.
+2. Import the updated JSON into that empty canvas (no duplication risk — nothing to
+   collide with).
+3. Re-attach the real Google Sheets credential to the "Google Sheets: Log Decision"
+   node — credentials aren't part of the exported JSON (deliberately, see "Storage
+   and dedup" below), so this one step has to happen by hand in the UI regardless of
+   import method.
+4. Once verified, delete or archive the old workflow.
+
 ### Verified during this phase, against the live API (not assumed from docs)
 
 - Base endpoint returns Elasticsearch-shaped JSON directly (no `/complaints` sub-path).
@@ -596,6 +609,40 @@ worth checking for on any fresh import that touches this node's document/sheet p
 `documentId`, `sheetName`, and `credentials` in the committed JSON remain the
 `REPLACE_WITH_...` placeholders deliberately — the real values live only in the local
 n8n instance's own configuration, never committed.
+
+### A structural fix found while backfilling: explicit Merge nodes at every convergence
+
+Backfilling the last 5 fixture tickets into the real Sheet (above) required manually
+walking every node of the real committed workflow by hand in the n8n UI, because six
+points in the graph — every place a branch (an IF node's true/false split, or an agent's
+optional tool-use path) reconverges on a shared downstream node — had both branches
+wired straight into the same input port, with no explicit node to combine them. That
+wiring is what a real, single, trigger-fired production execution actually needs
+(n8n's engine correctly merges whatever arrives at a shared input in one full run), but
+it silently carries forward only ONE of the two branches during manual, per-node
+"Execute step" testing — discovered by directly inspecting node input/output panels
+mid-backfill and confirmed reproducible across two independent attempts.
+
+Fixed at the source, not worked around: `build_workflow.js` now inserts a real
+`n8n-nodes-base.merge` node (`mode: "append"`, plain concatenation, no field matching)
+at each of the six convergence points — before `Route: Fixture or Live?`, before each
+of Agents 2/3/4, before `Compute Escalation Signals`, and before `Prepare Row for
+Google Sheets` — instead of wiring both branches into one port directly. `scripts/
+simulate_workflow.mjs` was updated to understand the new node type: it computes, once
+per `execute()` call, which of a Merge node's inputs are actually reachable from that
+call's start node (a Merge fed partly by the live-fetch branch must not wait forever
+for it when the run starts from the fixture harness, and vice versa — see the code
+comment on `mergeNode()`), and only waits for those before combining. Both the
+generator's self-test and the simulator's full graph-execution assertions pass
+unchanged against the retrofitted structure (same 8 escalated / 2 auto-resolved / 10
+Sheets rows), confirming the fix doesn't alter any pipeline behavior — it only fixes
+how the graph behaves under manual, non-trigger-fired execution.
+
+**Not yet re-imported into the live local n8n instance** — this fix lives in the
+committed generator and JSON; picking it up in a real running n8n install needs the
+"re-importing into an existing installation" procedure above (a fresh empty workflow,
+not an import on top of the current one) plus re-attaching the real Google Sheets
+credential by hand, since credentials never travel with the exported JSON.
 
 ## Not yet built (Phase 7)
 
