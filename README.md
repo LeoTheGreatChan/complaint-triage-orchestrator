@@ -472,7 +472,7 @@ real pilot run accumulates more.
 
 ```bash
 node scripts/export_dashboard_data.mjs               # from the simulator (n=10, all fixtures)
-node scripts/export_dashboard_data.mjs --from-sheets  # from the real Google Sheet (n=5, see below)
+node scripts/export_dashboard_data.mjs --from-sheets  # from the real Google Sheet (n=10, see below)
 ```
 
 Both are genuine, non-fabricated sources, just proving different layers:
@@ -485,19 +485,24 @@ Both are genuine, non-fabricated sources, just proving different layers:
   of the actual "Pipeline Log" Google Sheet (see "Storage and dedup" below), fetched via
   an authenticated Sheets API read — back into the nested shape the dashboard expects
   (`reshapeSheetRow()` in the export script, the disclosed inverse of
-  `flattenForSheets()`). **Currently only 5 records**, because only 5 of the 10 fixture
-  tickets have ever actually been run through a real n8n execution or direct write that
-  landed in the real Sheet (A/B/C via direct writes, F/G via a real n8n "Execute step"
-  run during the Storage and dedup verification below) — D/E/H/I/J were only ever run
-  through the simulator, never against real storage. Proves the *storage* layer is
-  correct; genuinely can't show more than what's actually been written for real.
+  `flattenForSheets()`). **All 10 records** — every fixture ticket has now actually been
+  run through a real n8n execution and written to the real Sheet (A/B/C/F/G via earlier
+  real writes; D/E/H/I/J backfilled in a later pass, entirely by hand-clicking each node
+  of the real committed workflow in the n8n UI, since n8n's manual/partial execution
+  mode doesn't correctly merge two branches converging on the same node — each merge
+  point had to be resolved by pinning the correct branch's cached output before
+  continuing; see git history for the blow-by-blow). Proves the *storage* layer is
+  correct — this reads exactly what's genuinely sitting in the real Sheet, nothing added.
 
 **Not fully automatic:** refreshing `sheets_snapshot.json` itself currently requires an
-already-authenticated tool making a real Sheets API call (done once, manually, for this
-build) — there's no standalone Google API credential (e.g. a service account) wired up
-for the Streamlit process itself to read the Sheet live on every page load. The dashboard
-currently committed to this repo uses the `--from-sheets` data (n=5), matching the
-"prefer verified-real over larger-but-simulated" principle this whole build follows.
+already-authenticated tool making a real Sheets API call (done manually for this build)
+— there's no standalone Google API credential (e.g. a service account) wired up for the
+Streamlit process itself to read the Sheet live on every page load. The dashboard
+currently committed to this repo uses the `--from-sheets` data, matching the
+"prefer verified-real over larger-but-simulated" principle this whole build follows —
+and for the first time, real and simulated now agree exactly (same 10 tickets, same
+8 escalated / 2 auto-resolved split, same KPI values), since every fixture has genuinely
+been run through real storage at least once.
 
 **Pull a real batch of live tickets.** `pipeline_log.json` also carries a second,
 completely separate array, `awaiting_records`: real tickets fetched live from CFPB
@@ -524,13 +529,11 @@ real fixtures, so a re-pull now shows 18 — `Route: Fixture or Live?` checks
 they joined it, no extra filtering code required.
 
 **Of Section 9's five KPIs, three are computed from real data, two are honestly deferred.**
-Numbers below are the simulator's full n=10 fixture view; the dashboard as currently
-committed reads `--from-sheets` data instead (n=5 — see "Live dashboard data source"
-above), which naturally reads slightly differently since it's a subset (100% citation
-accuracy on 3/3 cited drafts, 100% category agreement on 5/5, 0% escalation agreement
-on 0/5) — same computations, smaller real denominator, not a discrepancy:
+The dashboard as committed reads `--from-sheets` data (see "Live dashboard data source"
+above); since every fixture has now genuinely been written to the real Sheet, its
+numbers below match the simulator's exactly:
 
-| KPI | Status (n=10, simulator) | Why |
+| KPI | Status (n=10) | Why |
 |---|---|---|
 | Citation accuracy | **100%** (4/4 cited drafts) | QA-verified: Agent 3's exact-clause-fetch tool actually resolved every cited regulation against the real cached corpus. Denominator is drafts that cite a regulation (4 of 10) — the other 6 genuinely found no match in this build's five-regulation corpus, see "Untested branches" above |
 | Category agreement | **100%** (10/10) | Agent 1's classified issue matches CFPB's own filed issue *or* sub-issue — Ticket C's classification lands at the sub-issue level, which is why the comparison checks both |
@@ -600,5 +603,6 @@ The mock-to-real Claude API swap — the last deliberately-held-back piece, to k
 API cost at zero until everything else is finalized. Every other phase's verification
 checklist item (real n8n import, real end-to-end execution, real Google Sheets write and
 dedup) is now closed. The dashboard's aggregate "% agreement" figure is real but thin
-(n=10 from the simulator, n=5 from the real Sheet — see Phase 6's "Live dashboard data
-source") until a real pilot run accumulates more tickets through Phase 7's real agents.
+(n=10, both from the simulator and from the real Sheet — see Phase 6's "Live dashboard
+data source") until a real pilot run accumulates more tickets through Phase 7's real
+agents.

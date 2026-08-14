@@ -280,9 +280,10 @@ account) wired up for the Streamlit process to fetch it live on every page load.
 the main README's "Live dashboard data source" section for the operational model and
 what a fully-automatic version would need.
 
-Consequence worth knowing: the real Sheet only contains whatever has actually been
-written to it by a genuine n8n execution or direct write, which as of this build is
-5 of the 10 fixture tickets — so `--from-sheets` produces `n=5` decided records, not
-the `n=10` the simulator-driven default produces. Both are real in their own way: the
-simulator proves the pipeline *logic*, `--from-sheets` proves the *storage* layer, and
-neither one is padded or fabricated.
+Consequence worth knowing: the real Sheet only ever contains whatever has actually been
+written to it by a genuine n8n execution or direct write — as of this build, that's all
+10 fixture tickets, so `--from-sheets` and the simulator-driven default now produce the
+same `n=10`. Both stay real in their own way: the simulator proves the pipeline *logic*,
+`--from-sheets` proves the *storage* layer, and neither one is padded or fabricated —
+they just happen to agree now that every fixture has actually been run through real
+storage at least once.
