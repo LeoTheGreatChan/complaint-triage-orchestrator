@@ -1494,19 +1494,28 @@ function parseAnthropicJson(apiResponse) {
 const jsParseAgent1Response = `
 ${parseAnthropicJson.toString()}
 
-const ticket = $input.item.json;
-const parsed = parseAnthropicJson(ticket);
-return { json: { ...ticket, agent1_tool_used: parsed.tool_used, agent1_output: { issues: parsed.issues, primary_issue: parsed.primary_issue } } };
+// n8n's HTTP Request node replaces the item's json with the raw API
+// response -- it does not merge the response with the original input. So
+// the original ticket (complaint_id, product, crm, etc.) must be pulled
+// back from the node that fed Real Agent 1, by name, rather than assumed
+// to still be present on $input.item.json (which is the API response).
+const apiResponse = $input.item.json;
+const originalTicket = $('IF: Is Fixture Ticket?').item.json;
+const parsed = parseAnthropicJson(apiResponse);
+return { json: { ...originalTicket, agent1_tool_used: parsed.tool_used, agent1_output: { issues: parsed.issues, primary_issue: parsed.primary_issue } } };
 `.trim();
 
 const jsParseAgent2Response = `
 ${parseAnthropicJson.toString()}
 
-const ticket = $input.item.json;
-const parsed = parseAnthropicJson(ticket);
+// See Parse: Real Agent 1 Response for why originalTicket is pulled from
+// the upstream node by name instead of $input.item.json.
+const apiResponse = $input.item.json;
+const originalTicket = $('Merge: Pre-Real Agent 2').item.json;
+const parsed = parseAnthropicJson(apiResponse);
 return {
   json: {
-    ...ticket,
+    ...originalTicket,
     agent2_broader_crm_lookup_used: parsed.broader_crm_lookup_used,
     agent2_output: { applicable_regulation: parsed.applicable_regulation, citation: parsed.citation, precedent_notes: parsed.precedent_notes },
   },
@@ -1516,11 +1525,14 @@ return {
 const jsParseAgent3Response = `
 ${parseAnthropicJson.toString()}
 
-const ticket = $input.item.json;
-const parsed = parseAnthropicJson(ticket);
+// See Parse: Real Agent 1 Response for why originalTicket is pulled from
+// the upstream node by name instead of $input.item.json.
+const apiResponse = $input.item.json;
+const originalTicket = $('Merge: Pre-Real Agent 3').item.json;
+const parsed = parseAnthropicJson(apiResponse);
 return {
   json: {
-    ...ticket,
+    ...originalTicket,
     agent3_tool_used: parsed.tool_used,
     agent3_output: { draft: parsed.draft, cites_regulation: parsed.cites_regulation },
     _agent3_cited_clause: parsed.cited_clause,
@@ -1531,11 +1543,14 @@ return {
 const jsParseAgent4Response = `
 ${parseAnthropicJson.toString()}
 
-const ticket = $input.item.json;
-const parsed = parseAnthropicJson(ticket);
+// See Parse: Real Agent 1 Response for why originalTicket is pulled from
+// the upstream node by name instead of $input.item.json.
+const apiResponse = $input.item.json;
+const originalTicket = $('Merge: Pre-Real Agent 4').item.json;
+const parsed = parseAnthropicJson(apiResponse);
 return {
   json: {
-    ...ticket,
+    ...originalTicket,
     agent4_tool_used: parsed.tool_used,
     agent4_output: { confidence: parsed.confidence, requires_human: parsed.requires_human, reason: parsed.reason },
     _agent4_reverify_clause: parsed.reverify_clause,
