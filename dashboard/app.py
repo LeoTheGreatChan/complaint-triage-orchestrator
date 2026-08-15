@@ -6,15 +6,16 @@ scripts/export_dashboard_data.mjs from the ACTUAL committed n8n workflow --
 this file computes and displays, it does not invent any pipeline logic of
 its own.
 
-Data honesty note (read before extending this file): as of this build, only
-tickets with hand-verified fixture data (spec Section 6's original three,
-plus any added since) have a genuine pipeline decision -- Phase 7's
-mock-to-real Claude API swap hasn't happened, so every other live ticket the
-Schedule/Manual trigger fetches still dead-ends. This dashboard is built to
-show that real, small n honestly (see EMPTY-STATE COPY below) rather than
-pad the log with invented tickets to make charts look fuller. When a real
-pilot run accumulates more records, this same code renders them -- nothing
-here assumes an exact count.
+Data honesty note (read before extending this file): as of this build, every
+record here has a genuine pipeline decision -- the hand-verified fixtures
+(spec Section 6) via real Agent 1-4 or the mock decision layer, and (since
+Phase 7's mock-to-real Claude API swap shipped) any further live ticket the
+Schedule/Manual trigger fetches, via the real Product path. There's no more
+"fetched but undecided" state to honestly represent, so this dashboard just
+shows real, small n (see EMPTY-STATE COPY below) rather than pad the log
+with invented tickets to make charts look fuller. When a real pilot run
+accumulates more records, this same code renders them -- nothing here
+assumes an exact count.
 
 Run: streamlit run dashboard/app.py
 """
@@ -436,7 +437,7 @@ def kpi_category_agreement(records):
 def render_kpi_card(col, label, value, sub):
     with col:
         if value is None:
-            value_html = '<div class="kpi-value pending">Awaiting Phase 7</div>'
+            value_html = '<div class="kpi-value pending">Awaiting timed run</div>'
             sub_html = f'<div class="kpi-sub">{sub}</div>'
         else:
             value_html = f'<div class="kpi-value">{value}%</div>'
@@ -652,50 +653,6 @@ def render_auto_resolved_table(records):
     )
 
 
-def render_awaiting_table(awaiting_records, decided_count):
-    # Real tickets, real CRM records, zero agent decision -- kept in its own
-    # section so it can never be mistaken for a decided ticket or leak into
-    # a KPI. See scripts/export_dashboard_data.mjs's module docstring.
-    if not awaiting_records:
-        return
-    rows = []
-    for r in awaiting_records:
-        received = (r.get("date_received") or "")[:10]
-        rows.append(
-            f"""
-            <tr>
-                <td class="mono">{r['complaint_id']}</td>
-                <td>{r['company']}</td>
-                <td>{r['product']}</td>
-                <td>{r['issue']}</td>
-                <td>{r.get('state', '')}</td>
-                <td>{received}</td>
-            </tr>
-            """
-        )
-    with st.expander(f"{len(awaiting_records)} real tickets fetched live, awaiting Phase 7 (no decision yet)"):
-        st.markdown(
-            '<p class="section-caption">Fetched from the real CFPB API and given a real synthetic CRM '
-            "record (Phase 1/2 both genuinely ran) — but no agent has looked at any of these. No "
-            "severity, no draft, no escalation call. Excluded from every KPI and chart above, which are "
-            f"computed only from the {decided_count} tickets that have an actual pipeline decision.</p>",
-            unsafe_allow_html=True,
-        )
-        md_html(
-            f"""
-            <table class="queue-table">
-                <thead>
-                    <tr>
-                        <th>Complaint ID</th><th>Company</th><th>Product</th>
-                        <th>Issue</th><th>State</th><th>Date received</th>
-                    </tr>
-                </thead>
-                <tbody>{''.join(rows)}</tbody>
-            </table>
-            """
-        )
-
-
 # ---------------------------------------------------------------------------
 # Agent legend -- what "Agent 1/2/3/4" mean, spec Section 6. Rendered as a
 # persistent reference at the top of the Technical detail tab rather than
@@ -741,7 +698,6 @@ def main():
         return
 
     records = log["records"]
-    awaiting_records = log.get("awaiting_records", [])
 
     # Category filter: single source of truth for both tabs. Read directly
     # from session_state rather than the st.multiselect(...) call itself,
@@ -792,14 +748,13 @@ def main():
         if len(records) < 50:
             st.markdown(
                 f'<p class="section-caption"><strong>{len(records)} ticket(s) processed to date</strong> — '
-                "this build's four agents are mock-first (spec Phase 3): only tickets with hand-verified "
-                "fixture data (spec Section 6's original three, plus any added since) have a genuine "
-                "pipeline decision. Real live-ticket volume arrives after Phase 7's Claude API swap; charts "
-                "below reflect exactly what's real today, not a padded sample.</p>",
+                "small n because this is a pilot, not because anything's faked: every record here has a "
+                "genuine pipeline decision, either from the hand-verified fixtures (spec Section 6) run "
+                "through real Agent 1-4 (3 of them) or the mock decision layer (the rest), or from further "
+                "real tickets processed since. Charts below reflect exactly what's real today, not a "
+                "padded sample.</p>",
                 unsafe_allow_html=True,
             )
-
-        render_awaiting_table(awaiting_records, len(filtered_records))
 
         cols = st.columns(5)
         hs_val, hs_sub = kpi_hours_saved()

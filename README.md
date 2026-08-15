@@ -522,29 +522,24 @@ and for the first time, real and simulated now agree exactly (same 10 tickets, s
 8 escalated / 2 auto-resolved split, same KPI values), since every fixture has genuinely
 been run through real storage at least once.
 
-**Pull a real batch of live tickets.** `pipeline_log.json` also carries a second,
-completely separate array, `awaiting_records`: real tickets fetched live from CFPB
-(Phase 1's actual HTTP call, capped at 25 per spec Section 5) with a real synthetic CRM
-record (Phase 2) attached, but no agent decision — no severity, no draft, no escalation
-call. Pull a fresh batch with:
-
-```bash
-node scripts/export_dashboard_data.mjs --live-batch
-```
-
-Without `--live-batch`, re-running the export only regenerates `records` from the
-fixtures and leaves whatever `awaiting_records` batch is already in the file untouched
-— no silent re-fetch. The dashboard renders the batch in a collapsed expander right
-under the KPI-row note; every KPI and chart still reads `records` only, so this can
-never contaminate a metric. Pulling this batch was also the first time
+**History: pulling a real batch of live tickets, before Phase 7 existed.**
+`pipeline_log.json` used to also carry a second, completely separate array,
+`awaiting_records`: real tickets fetched live from CFPB (Phase 1's actual HTTP call,
+capped at 25 per spec Section 5) with a real synthetic CRM record (Phase 2) attached,
+but no agent decision — because before Phase 7, a live (non-fixture) ticket genuinely
+had nowhere to go. Pulling that batch was also the first time
 `scripts/simulate_workflow.mjs` ever executed the live Schedule/Manual trigger path
 (`Get Watermark` → the real `CFPB Complaint Search` HTTP call → `Cap Batch & Advance
 Watermark`) — every earlier verification pass only ever exercised the fixture-trigger
 path, so this incidentally closed a real gap in Phase 1's own test coverage, four
 phases later. The first batch pulled 25; seven of them (D-J above) were promoted to
-real fixtures, so a re-pull now shows 18 — `Route: Fixture or Live?` checks
-`FIXTURE_IDS` directly, so those seven stopped dead-ending automatically the moment
-they joined it, no extra filtering code required.
+real fixtures, so a re-pull showed 18 — `Route: Fixture or Live?` checks `FIXTURE_IDS`
+directly, so those seven stopped dead-ending automatically the moment they joined it,
+no extra filtering code required. Once Phase 7 replaced the dead-end with the real
+Product path, a "fetched but undecided" state became impossible to honestly produce
+again, so `awaiting_records` and the `--live-batch` flag that populated it were
+removed from `export_dashboard_data.mjs` rather than left as dead code pointing at a
+node (`Live Ticket (Awaiting Phase 7)`) that no longer exists in the workflow.
 
 **Of Section 9's five KPIs, three are computed from real data, two are honestly deferred.**
 The dashboard as committed reads `--from-sheets` data (see "Live dashboard data source"

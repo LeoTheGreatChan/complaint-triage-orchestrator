@@ -27,33 +27,29 @@ of the pipeline logic. Re-run it any time the workflow changes; `pipeline_log.js
 committed so the dashboard runs out of the box without that step, but it will go stale
 if the workflow changes and this isn't re-run.
 
-**Why only 3 decided records.** Phase 7 (the mock-to-real Claude API swap) hasn't
-happened — every live ticket the Schedule/Manual trigger fetches still dead-ends at
-"Live Ticket (Awaiting Phase 7)." The three Section 6 fixture tickets are the only ones
-with a genuine, fully-processed pipeline decision, so `records` (what every KPI/chart
-reads) is just those 3. It does not pad the log with invented tickets to make the
-charts look fuller — see the in-app note under the KPI row, and `app.py`'s module
-docstring.
+**`records` holds every genuinely decided ticket.** As of Phase 7 (the mock-to-real
+Claude API swap), that's not just the fixtures: a live ticket the Schedule/Manual
+trigger fetches now flows through the real Product path (real Agent 1-4) instead of
+dead-ending, so it gets a genuine decision too. It does not pad the log with invented
+tickets to make the charts look fuller — see the in-app note under the KPI row, and
+`app.py`'s module docstring.
 
-**A second array, `awaiting_records`, holds real undecided tickets, kept fully
-separate.** Pull a real batch (real CFPB fetch, real synthetic CRM, capped at 25 per
-spec Section 5) with:
-
-```bash
-node scripts/export_dashboard_data.mjs --live-batch
-```
-
-Without `--live-batch`, re-running the export script only regenerates `records` from
-the fixtures and leaves whatever `awaiting_records` batch is already in the file alone
-— it does not silently re-fetch or wipe it on every routine regen. The dashboard
-renders this batch in a collapsed expander ("N real tickets fetched live, awaiting
-Phase 7") right under the intro note — real company names, real issues, real dates,
-zero agent output, and explicitly excluded from every KPI/chart, which read `records`
-only. This was also the first time `scripts/simulate_workflow.mjs` executed the live
-Schedule/Manual trigger path at all (`Get Watermark`, the real `CFPB Complaint Search`
-HTTP call, `Cap Batch & Advance Watermark`) — every previous verification only ever
-exercised the fixture-trigger path, so this incidentally closed a real gap in Phase 1's
-own test coverage, four phases later.
+**History: before Phase 7, there was a second array, `awaiting_records`, for real
+tickets fetched live but not yet decided.** Early in this build, a live-fetched ticket
+genuinely had nowhere to go — mock Agent 1-4 only had hand-verified answers for the
+fixtures, and no real Agent existed yet to decide anything else — so
+`export_dashboard_data.mjs --live-batch` fetched a real batch (real CFPB fetch, real
+synthetic CRM, capped at 25 per spec Section 5) and the dashboard rendered it
+separately, explicitly excluded from every KPI/chart, so undecided tickets could never
+contaminate a metric. That pull was also the first time `scripts/simulate_workflow.mjs`
+executed the live Schedule/Manual trigger path at all (`Get Watermark`, the real
+`CFPB Complaint Search` HTTP call, `Cap Batch & Advance Watermark`) — every earlier
+verification pass only ever exercised the fixture-trigger path, incidentally closing a
+real gap in Phase 1's own test coverage, four phases later. Once Phase 7 shipped and
+replaced the dead-end with the real Product path, a "fetched but undecided" state
+became impossible to honestly produce again, so `awaiting_records` and the
+`--live-batch` flag were removed rather than left as dead code pointing at a node that
+no longer exists (`n8n/workflows/`'s "Live Ticket (Awaiting Phase 7)").
 
 **Five of that first 25-ticket batch were promoted to real fixtures (Tickets D-H),
 staying mock-first the whole way.** Rather than spend real Claude API credits (Phase 7
