@@ -490,7 +490,7 @@ real pilot run accumulates more.
 
 ```bash
 node scripts/export_dashboard_data.mjs               # from the simulator (n=10, all fixtures)
-node scripts/export_dashboard_data.mjs --from-sheets  # from the real Google Sheet (n=10, see below)
+node scripts/export_dashboard_data.mjs --from-sheets  # from the real Google Sheet (n=11, see below)
 ```
 
 Both are genuine, non-fabricated sources, just proving different layers:
@@ -500,27 +500,60 @@ Both are genuine, non-fabricated sources, just proving different layers:
   seven real tickets D-J, hand-verified the same way (see "Pull a real batch of live
   tickets" below). Proves the pipeline *logic* end-to-end; doesn't touch real storage.
 - **`--from-sheets`:** reshapes `dashboard/data/sheets_snapshot.json` — a real snapshot
-  of the actual "Pipeline Log" Google Sheet (see "Storage and dedup" below), fetched via
-  an authenticated Sheets API read — back into the nested shape the dashboard expects
-  (`reshapeSheetRow()` in the export script, the disclosed inverse of
-  `flattenForSheets()`). **All 10 records** — every fixture ticket has now actually been
-  run through a real n8n execution and written to the real Sheet (A/B/C/F/G via earlier
-  real writes; D/E/H/I/J backfilled in a later pass, entirely by hand-clicking each node
-  of the real committed workflow in the n8n UI, since n8n's manual/partial execution
-  mode doesn't correctly merge two branches converging on the same node — each merge
-  point had to be resolved by pinning the correct branch's cached output before
-  continuing; see git history for the blow-by-blow). Proves the *storage* layer is
-  correct — this reads exactly what's genuinely sitting in the real Sheet, nothing added.
+  of the actual "Pipeline Log" Google Sheet (see "Storage and dedup" below) — back into
+  the nested shape the dashboard expects (`reshapeSheetRow()` in the export script, the
+  disclosed inverse of `flattenForSheets()`). **11 records:** the ten Section 6 fixtures
+  (A/B/C/F/G via earlier real writes; D/E/H/I/J backfilled in a later pass, entirely by
+  hand-clicking each node of the real committed workflow in the n8n UI, since n8n's
+  manual/partial execution mode doesn't correctly merge two branches converging on the
+  same node — each merge point had to be resolved by pinning the correct branch's cached
+  output before continuing; see git history for the blow-by-blow) agree exactly with the
+  simulator's own decisions for those same ten, plus one further real, non-fixture
+  ticket (SoFi, complaint 24246633) that exists only in the real Sheet — fetched and
+  decided by the first genuine autonomous trigger-fired run of the real Product path
+  (cost-capped to 1 ticket). Proves the *storage* layer is correct — this reads exactly
+  what's genuinely sitting in the real Sheet, nothing added.
 
-**Not fully automatic:** refreshing `sheets_snapshot.json` itself currently requires an
-already-authenticated tool making a real Sheets API call (done manually for this build)
-— there's no standalone Google API credential (e.g. a service account) wired up for the
-Streamlit process itself to read the Sheet live on every page load. The dashboard
-currently committed to this repo uses the `--from-sheets` data, matching the
-"prefer verified-real over larger-but-simulated" principle this whole build follows —
-and for the first time, real and simulated now agree exactly (same 10 tickets, same
-8 escalated / 2 auto-resolved split, same KPI values), since every fixture has genuinely
-been run through real storage at least once.
+**Live sync, now wired up.** The deployed dashboard reads the real Sheet directly, live,
+on every page load (`dashboard/sheets_source.py`, cached 5 minutes via
+`@st.cache_data(ttl=300)` so a freshly-processed ticket shows up without a server
+restart) — it no longer depends on `sheets_snapshot.json` being refreshed by hand. That
+file and the `pipeline_log.json` it generates still exist and still matter: they're the
+deliberate fallback path, rendered whenever no credential is configured or the live call
+fails for any reason, so the dashboard never crashes on a live-data hiccup — it just
+quietly serves the last real snapshot instead, with an in-app caption disclosing which
+of the two it's actually showing ("Data source: live Google Sheet" vs "Data source:
+static snapshot").
+
+**Why OAuth instead of a service account.** The natural choice — a Google Cloud service
+account, scoped read-only, with the Sheet shared to its own email as Viewer — turned out
+to be unavailable: this project's Google Cloud org enforces the organization policy
+`iam.disableServiceAccountKeyCreation`, a "secure by default" setting that blocks
+service-account key creation outright, not a project-level misconfiguration. Rather than
+have an org admin weaken that policy for one dashboard credential, the dashboard
+authenticates via a dedicated OAuth 2.0 Client ID instead (Desktop app type, Internal
+consent screen — restricted to this Google Workspace org's own accounts, so it never
+needs Google's verification review). A refresh token is minted once, interactively, by
+[`scripts/get_google_oauth_refresh_token.py`](scripts/get_google_oauth_refresh_token.py)
+— it drives a real browser-based Google consent flow and writes the resulting
+`client_id`/`client_secret`/`refresh_token` straight into `.streamlit/secrets.toml`
+(git-ignored; see `.streamlit/secrets.toml.example` for the shape), never printing them
+to the terminal. In production, the same three fields go into the hosting platform's own
+secret manager (Streamlit Community Cloud's "Secrets" panel, Render's "Secret Files",
+etc.) instead of any committed file.
+
+**The scope tradeoff, disclosed rather than hidden.** OAuth authenticates as the account
+owner, not as an isolated principal the way a service account does — Google's
+`spreadsheets.readonly` scope is necessarily "read every Sheet this account can read,"
+and there's no narrower single-file OAuth scope without a browser-based Google Picker
+consent flow (the `drive.file` scope), which wasn't built here given the Sheet's actual
+contents are already either real public CFPB complaint data or disclosed-synthetic CRM
+records — genuinely not sensitive — and the token is fully revocable in one click from
+the account's Google security settings regardless. This tradeoff, and the alternatives
+considered (a public "anyone with the link" Sheet plus a restricted API key; true
+Workload Identity Federation, impractical here since neither Streamlit Community Cloud
+nor Render are GCP-trusted OIDC issuers), was worked through explicitly rather than
+defaulted into.
 
 **History: pulling a real batch of live tickets, before Phase 7 existed.**
 `pipeline_log.json` used to also carry a second, completely separate array,
@@ -542,15 +575,16 @@ removed from `export_dashboard_data.mjs` rather than left as dead code pointing 
 node (`Live Ticket (Awaiting Phase 7)`) that no longer exists in the workflow.
 
 **Of Section 9's five KPIs, three are computed from real data, two are honestly deferred.**
-The dashboard as committed reads `--from-sheets` data (see "Live dashboard data source"
-above); since every fixture has now genuinely been written to the real Sheet, its
-numbers below match the simulator's exactly:
+The deployed dashboard reads live Sheet data by default (see "Live dashboard data
+source" above); the fixture-derived nine of these eleven records match the simulator's
+decisions exactly, and the eleventh (SoFi, a genuine non-fixture live ticket) exists
+only in the real numbers below:
 
-| KPI | Status (n=10) | Why |
+| KPI | Status (n=11) | Why |
 |---|---|---|
-| Citation accuracy | **100%** (4/4 cited drafts) | QA-verified: Agent 3's exact-clause-fetch tool actually resolved every cited regulation against the real cached corpus. Denominator is drafts that cite a regulation (4 of 10) — the other 6 genuinely found no match in this build's five-regulation corpus, see "Untested branches" above |
-| Category agreement | **100%** (10/10) | Agent 1's classified issue matches CFPB's own filed issue *or* sub-issue — Ticket C's classification lands at the sub-issue level, which is why the comparison checks both |
-| Escalation agreement | **20%** (2/10) | Real, computed — see the Phase 5 "finding worth sitting with" above; CFPB's outcome category is coarser than this pipeline's narrative-informed decision, so this reads directional, not as an accuracy score |
+| Citation accuracy | **100%** (5/5 cited drafts) | QA-verified: Agent 3's exact-clause-fetch tool actually resolved every cited regulation against the real cached corpus. Denominator is drafts that cite a regulation (5 of 11) — the other 6 genuinely found no match in this build's five-regulation corpus, see "Untested branches" above |
+| Category agreement | **100%** (11/11) | Agent 1's classified issue matches CFPB's own filed issue *or* sub-issue — Ticket C's classification lands at the sub-issue level, which is why the comparison checks both |
+| Escalation agreement | **18%** (2/11) | Real, computed — see the Phase 5 "finding worth sitting with" above; CFPB's outcome category is coarser than this pipeline's narrative-informed decision, so this reads directional, not as an accuracy score |
 | Hours saved / ticket | **Awaiting a timed production run** | Phase 7's real-API verification confirmed correctness, not throughput — timing wasn't the point of that run and wasn't captured. Requires a dedicated timed pass; reporting a number without one would fabricate exactly what this project has spent five phases refusing to fake |
 | SLA compliance | **Awaiting a timed production run** | Same reasoning as hours saved |
 

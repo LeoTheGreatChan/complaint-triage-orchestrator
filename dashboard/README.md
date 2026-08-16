@@ -268,18 +268,22 @@ rules for fields the flat schema doesn't store at all (`agent3`/`agent4` `tool_u
 `agent3.tool_result.found` — reconstructed from a verified architectural invariant, not
 guessed; the function's own comment explains why it's provably correct).
 
-This is a real, working data path, verified live in the dashboard — but it's
-**on-demand, not automatic**: refreshing `sheets_snapshot.json` itself requires an
-authenticated Sheets API call (currently done via an already-signed-in MCP tool, not
-by this script), and there's no standalone Google API credential (e.g. a service
-account) wired up for the Streamlit process to fetch it live on every page load. See
-the main README's "Live dashboard data source" section for the operational model and
-what a fully-automatic version would need.
+This is a real, working data path, verified live in the dashboard. `sheets_snapshot.json`
+and this script remain the fallback path: the deployed dashboard now reads the real
+Sheet live, on every page load, via a dedicated OAuth 2.0 credential
+(`dashboard/sheets_source.py`, cached 5 minutes) — falling back to this static snapshot
+only when no credential is configured or the live call fails. See the main README's
+"Live dashboard data source" section for the full mechanism, including why a service
+account wasn't an option (the Google Cloud org this project runs under enforces
+`iam.disableServiceAccountKeyCreation`) and the scope tradeoff that comes with OAuth
+instead.
 
 Consequence worth knowing: the real Sheet only ever contains whatever has actually been
 written to it by a genuine n8n execution or direct write — as of this build, that's all
-10 fixture tickets, so `--from-sheets` and the simulator-driven default now produce the
-same `n=10`. Both stay real in their own way: the simulator proves the pipeline *logic*,
-`--from-sheets` proves the *storage* layer, and neither one is padded or fabricated —
-they just happen to agree now that every fixture has actually been run through real
-storage at least once.
+10 fixture tickets plus one further real, non-fixture ticket from the first genuine
+autonomous trigger-fired run (SoFi, complaint 24246633), so `--from-sheets` now produces
+`n=11` against the simulator-driven default's `n=10`. Both stay real in their own way:
+the simulator proves the pipeline *logic*, `--from-sheets` (and now the live read) prove
+the *storage* layer, and neither one is padded or fabricated — the ten fixtures agree
+with the simulator's own decisions exactly, and the eleventh simply doesn't exist in the
+simulator's fixture set at all.

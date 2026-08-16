@@ -28,6 +28,8 @@ import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
+from sheets_source import fetch_live_pipeline_log
+
 
 def md_html(s: str):
     """st.markdown(unsafe_allow_html=True), but with every line's leading
@@ -358,8 +360,15 @@ def plotly_brand_layout(fig: go.Figure, title: str) -> go.Figure:
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
-@st.cache_data
+@st.cache_data(ttl=300)
 def load_pipeline_log():
+    """Live Sheet first (re-polled every 5 min via the ttl above, so a
+    freshly-processed ticket shows up without restarting the app), falling
+    back to the committed static snapshot when no service-account secret is
+    configured or the live call fails -- see sheets_source.py."""
+    live = fetch_live_pipeline_log()
+    if live is not None:
+        return live
     if not DATA_PATH.exists():
         return None
     with open(DATA_PATH, encoding="utf-8") as f:
@@ -745,6 +754,13 @@ def main():
     tab_overview, tab_technical = st.tabs(["Overview", technical_label])
 
     with tab_overview:
+        is_live = log.get("_meta", {}).get("records_source") == "google_sheets_live"
+        data_source_note = (
+            "Data source: live Google Sheet, re-checked every 5 minutes."
+            if is_live
+            else "Data source: static snapshot (no live Google credential configured for this deployment — "
+            "see the README's \"Live dashboard data source\" section)."
+        )
         if len(records) < 50:
             st.markdown(
                 f'<p class="section-caption"><strong>{len(records)} ticket(s) processed to date</strong> — '
@@ -752,7 +768,7 @@ def main():
                 "genuine pipeline decision, either from the hand-verified fixtures (spec Section 6) run "
                 "through real Agent 1-4 (3 of them) or the mock decision layer (the rest), or from further "
                 "real tickets processed since. Charts below reflect exactly what's real today, not a "
-                "padded sample.</p>",
+                f"padded sample. {data_source_note}</p>",
                 unsafe_allow_html=True,
             )
 
