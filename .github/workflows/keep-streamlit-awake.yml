@@ -6,7 +6,7 @@ name: Keep Streamlit app awake
 # logic, just keeping the hosted app from sleeping.
 on:
   schedule:
-    - cron: "0 6 */3 * *" # every 3 days at 06:00 UTC -- comfortable margin
+    - cron: "0 */5 * * *" # every 5 hours -- public repo, Actions minutes are unlimited/free
   workflow_dispatch: {} # allows a manual "Run workflow" click too
 
 jobs:
