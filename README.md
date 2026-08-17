@@ -38,6 +38,43 @@ queue.
 **What makes it different:** AI handles interpretation. Deterministic code handles
 evidence, escalation, and audit.
 
+```mermaid
+flowchart TD
+    A[Real CFPB Complaint Data] --> B[+ Synthetic CRM Context]
+    B --> S1
+
+    subgraph S1["Agent 1 — Classification"]
+        direction LR
+        A1[Claude call] -.->|conditional| A1T[Tool: Taxonomy Lookup]
+    end
+    S1 --> S2
+
+    subgraph S2["Agent 2 — Research"]
+        direction LR
+        A2[Claude call] -->|always| A2T[Tool: Regulation Index + Special-Population Check]
+        A2 -.->|conditional| A2T2[Tool: Broader CRM Lookup]
+    end
+    S2 --> S3
+
+    subgraph S3["Agent 3 — Drafting"]
+        direction LR
+        A3[Claude call] -.->|conditional| A3T[Tool: Exact Clause Fetch]
+    end
+    S3 --> S4
+
+    subgraph S4["Agent 4 — QA / Escalation-Scoring"]
+        direction LR
+        A4[Claude call] -.->|conditional| A4T[Tool: Re-verify Clause + CRM Fact]
+    end
+    S4 --> G{Deterministic Escalation Gate}
+
+    G -->|signals trip| H[Human Queue]
+    G -->|clean| I[Auto-Resolve]
+    H --> J[(Google Sheets: Audit Log + Dedup)]
+    I --> J
+    J --> K[Live Streamlit Dashboard]
+```
+
 **What's actually real here, not simulated:**
 - Real CFPB complaint data, fetched live from the public Consumer Complaint Database API
 - Real federal regulation text (FDCPA, FCRA, Regulation Z), sourced verbatim from Cornell LII/CFPB
@@ -72,55 +109,17 @@ evidence, and human escalation wherever risk remains — then measure whether it
 actually worked, and say so plainly when a number (like 17% escalation agreement,
 below) looks worse than it is and needs explaining rather than hiding.
 
-## Field-claim verification pass (Section 3a/3b, post-v8)
+## Documentation verification
 
-Requested after the disputed-flag finding (Phase 5) surfaced a real inaccuracy in the
-spec: rather than assume the rest of Section 3a/3b's factual claims were solid because
-two errors had already turned up through separate paths, every checkable field claim
-was re-verified directly against live sources.
-
-- **Tickets A (9999970) and B (9999975):** every field in Section 3a's table — product,
-  sub-product, issue, sub-issue, company, state, tags, date received, timely, company
-  response — confirmed to match the live record exactly, via direct complaint-record
-  lookup (not aggregation sampling).
-- **Ticket C (9999983):** confirmed real and matching, after an initial false negative.
-  A broad, unscoped search across all of 2024-09-03's ~11,000 complaints didn't surface
-  it — but that search relied on Elasticsearch `frm`/`size` pagination sorted on
-  `created_date_asc`, a field with many tied timestamps across a huge result set, which
-  is a known way to non-deterministically skip records during paging. A tightly-scoped
-  query (product + company + narrow date range, small enough to return in one page, no
-  pagination risk) found it immediately, exact match on every field except one: Section
-  3a's table says sub-product `"General-purpose credit card"`; the live record says
-  `"General-purpose credit card or charge card"` — Section 3a's version was truncated.
-  Fixed in this repo's fixture data (`scripts/build_workflow.js`); worth a look if you
-  want to correct Section 3a's table too. Surfacing this near-miss rather than quietly
-  discarding the failed search: the methodology error was caught and corrected before
-  being reported, not after.
-- **Fixture precision:** while verifying, also updated all three fixtures'
-  `date_received` from a midnight placeholder to the real live timestamps
-  (`2024-09-03T22:24:41Z` / `22:28:25Z` / `22:07:34Z`) — doesn't change any escalation
-  logic (still the same calendar date), just tightens fidelity to the real record now
-  that it's directly confirmed.
-- **Section 3b's five regulation citations/topics:** all confirmed exact matches
-  against `reference_data/regulations/*.json`'s `_meta` blocks — no drift.
-- **One documentation gap, not a data error:** Section 3b names eCFR as Regulation Z's
-  source; Phase 1 actually used Cornell LII's CFR mirror because eCFR's direct URL
-  blocked automated access. The regulatory *text* was already independently verified
-  against the real statute in Phase 1 — only the source *label* had drifted from what
-  was actually fetched. Documented in
-  [`reference_data/README.md`](reference_data/README.md).
-
-The Section 6 taxonomy-sibling discrepancy flagged in Phase 1 was outside this pass's
-scope (3a/3b only) and was still sitting uncorrected in the spec as of v8, three
-versions after being flagged — fixed in v11 after being raised again explicitly.
-**Update, post-v10:** a full diff of every discrepancy flagged anywhere in this repo
-(both READMEs, workflow node notes, script comments) against the current spec text
-found no other gaps — every item flagged through Phase 5 and both verification passes
-is now reflected in spec v11. This paragraph itself was the one piece of stale
-documentation the diff turned up (it previously said the Section 6 issue "remains open
-as of v8," which stopped being true once v11 shipped) — worth noting that keeping this
-file in sync is exactly the kind of thing that needs deliberate re-checking, not
-just the spec.
+Every data, taxonomy, and regulatory-citation claim in the spec has been reconciled
+against live sources — including a near-miss where a first search pass, using
+Elasticsearch pagination on a field with many tied timestamps, produced a false
+negative before a tighter query found the record. See
+[`docs/verification-notes.md`](docs/verification-notes.md) for the full chronology:
+what was checked, what a false negative looked like and how it was caught, and the
+one real discrepancy found and fixed in the spec text itself. Recorded rather than
+silently corrected — the same "disclose it, don't hide it" principle as everything
+else in this README.
 
 ## Phase 1 — access, trigger, reference data
 
