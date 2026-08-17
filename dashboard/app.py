@@ -381,19 +381,26 @@ def load_pipeline_log():
 # measurable" state -- no metric here is invented to fill a card.
 # ---------------------------------------------------------------------------
 def kpi_hours_saved():
-    # Spec Section 9: "only the pipeline's own processing time still awaits
-    # a real measurement at Phase 7" -- this build has never run against a
-    # real, timed production schedule, only a manually-invoked test
-    # harness. Reporting a number here would be fabricating exactly the
-    # kind of figure this project has spent five phases refusing to fake.
-    return None, "real pipeline timing (manual baseline: ~10 min/ticket, sourced)"
+    # Spec Section 9: measured pipeline time vs. the locked manual baseline
+    # (~10 min/ticket). First real measurement, n=1: complaint 24332933,
+    # trigger-fired 2026-08-17, real n8n execution #240 (13.678s: watermark
+    # fetch through all 4 real Claude agent calls, ending at a Google
+    # Sheets credential failure) + #241 (3.151s retry, resuming from the
+    # failed node -- no agents re-run, no added API cost -- to complete the
+    # write) = 16.829s real end-to-end pipeline time for one ticket.
+    manual_baseline_seconds = 10 * 60
+    measured_seconds = 16.829
+    pct_faster = round(100 * (manual_baseline_seconds - measured_seconds) / manual_baseline_seconds)
+    minutes_saved = round((manual_baseline_seconds - measured_seconds) / 60, 1)
+    return pct_faster, f"{minutes_saved} min saved/ticket vs. ~10 min manual baseline (n=1, real timed run)"
 
 
 def kpi_sla_compliance():
-    # Same reasoning as hours saved: "draft ready inside the 15-day window"
-    # requires a real elapsed-time measurement from an actual production
-    # run, which doesn't exist yet -- only manual test-harness executions.
-    return None, "real pipeline timing measurement"
+    # Spec Section 9: % of complaints with a compliant draft ready inside
+    # the 15-day CFPB window. Same n=1 measurement as hours saved --
+    # 16.829s is trivially inside a 15-day window, so this ticket is
+    # compliant; a single real data point, not yet a meaningful rate.
+    return 100, "1/1 tickets with a compliant draft ready inside the 15-day CFPB window (n=1, real timed run)"
 
 
 def kpi_citation_accuracy(records):

@@ -96,15 +96,17 @@ compiling.
 
 ## KPIs: what's real, what's honestly deferred
 
-Of Section 9's five metrics, three are computed directly from the pipeline log
-(Citation accuracy, Escalation agreement, Category agreement) and two show "Awaiting
-Phase 7" instead of a number (Hours saved/ticket, SLA compliance) — both require a
-real, timed production run to measure honestly, which doesn't exist yet, only manual
-test-harness executions. See each `kpi_*` function in `app.py` for the exact
-computation and reasoning. Escalation agreement reads `20%` (2/10) as of this build,
-not because the pipeline is graded against CFPB's coarse label and mostly fails it —
-see the ground-truth section of the main README before treating that number itself as
-meaningful beyond "directional."
+All five of Section 9's metrics are now real: three computed directly from the
+pipeline log on every page load (Citation accuracy, Escalation agreement, Category
+agreement), and two (Hours saved/ticket, SLA compliance) from a single real timed
+production run — n8n execution #240→#241, complaint 24332933, 16.829s end-to-end
+against the sourced ~10 min manual baseline. See each `kpi_*` function in `app.py`
+for the exact computation and reasoning, and the main README's Phase 7 section for
+the full story of that run (including a Google Sheets credential failure recovered
+without a second real API spend). Escalation agreement reads `17%` (2/12) as of this
+build, not because the pipeline is graded against CFPB's coarse label and mostly
+fails it — see the ground-truth section of the main README before treating that
+number itself as meaningful beyond "directional."
 
 ## Queue view: escalated vs. auto-resolved
 

@@ -576,17 +576,17 @@ node (`Live Ticket (Awaiting Phase 7)`) that no longer exists in the workflow.
 
 **Of Section 9's five KPIs, three are computed from real data, two are honestly deferred.**
 The deployed dashboard reads live Sheet data by default (see "Live dashboard data
-source" above); the fixture-derived nine of these eleven records match the simulator's
-decisions exactly, and the eleventh (SoFi, a genuine non-fixture live ticket) exists
-only in the real numbers below:
+source" above); the fixture-derived ten of these twelve records match the simulator's
+decisions exactly, and the other two (SoFi and CITIBANK, both genuine non-fixture live
+tickets) exist only in the real numbers below:
 
-| KPI | Status (n=11) | Why |
+| KPI | Status (n=12) | Why |
 |---|---|---|
-| Citation accuracy | **100%** (5/5 cited drafts) | QA-verified: Agent 3's exact-clause-fetch tool actually resolved every cited regulation against the real cached corpus. Denominator is drafts that cite a regulation (5 of 11) — the other 6 genuinely found no match in this build's five-regulation corpus, see "Untested branches" above |
-| Category agreement | **100%** (11/11) | Agent 1's classified issue matches CFPB's own filed issue *or* sub-issue — Ticket C's classification lands at the sub-issue level, which is why the comparison checks both |
-| Escalation agreement | **18%** (2/11) | Real, computed — see the Phase 5 "finding worth sitting with" above; CFPB's outcome category is coarser than this pipeline's narrative-informed decision, so this reads directional, not as an accuracy score |
-| Hours saved / ticket | **Awaiting a timed production run** | Phase 7's real-API verification confirmed correctness, not throughput — timing wasn't the point of that run and wasn't captured. Requires a dedicated timed pass; reporting a number without one would fabricate exactly what this project has spent five phases refusing to fake |
-| SLA compliance | **Awaiting a timed production run** | Same reasoning as hours saved |
+| Hours saved / ticket | **97%** (9.7 min saved/ticket) | First real timed measurement (n=1): complaint 24332933 (CITIBANK), trigger-fired 2026-08-17. n8n execution #240 ran the real watermark fetch through all 4 real Claude agent calls in 13.678s, then hit an expired Google Sheets OAuth credential on the final write; #241 retried from that failed node (no agents re-run, no added API cost) and completed the write in 3.151s. Real end-to-end: **16.829s**, against the sourced ~10 min manual baseline — 9.7 minutes saved per ticket. One measurement, not yet an average |
+| Citation accuracy | **100%** (6/6 cited drafts) | QA-verified: Agent 3's exact-clause-fetch tool actually resolved every cited regulation against the real cached corpus. Denominator is drafts that cite a regulation (6 of 12) — the rest genuinely found no match in this build's five-regulation corpus, see "Untested branches" above |
+| SLA compliance | **100%** (1/1) | Same n=1 measurement as hours saved — 16.829s is trivially inside CFPB's 15-day window. A real data point, not yet a meaningful rate |
+| Escalation agreement | **17%** (2/12) | Real, computed — see the Phase 5 "finding worth sitting with" above; CFPB's outcome category is coarser than this pipeline's narrative-informed decision, so this reads directional, not as an accuracy score |
+| Category agreement | **100%** (12/12) | Agent 1's classified issue matches CFPB's own filed issue *or* sub-issue — Ticket C's classification lands at the sub-issue level, which is why the comparison checks both |
 
 **Streamlit implementation gotcha found and fixed:** every custom-HTML block in
 `app.py` (KPI cards, the queue table, the CSS injection) is built from Python
@@ -833,5 +833,29 @@ of the same four agents.
 3. ~~Confirm dedup still holds with real agent output.~~ **Done** — the
    Append-or-Update write updated the existing rows for A/B/C in place; the sheet
    still has exactly 10 rows, not 13.
-4. Measure real per-ticket processing time for the dashboard's "Hours saved / ticket"
-   and "SLA compliance" KPIs — the only genuinely open item left in this phase.
+4. ~~Measure real per-ticket processing time for the dashboard's "Hours saved / ticket"
+   and "SLA compliance" KPIs.~~ **Done** — see the KPI table above (16.829s real,
+   n=1). The only friction: n8n's own Google Sheets OAuth credential had silently
+   expired, failing the run's final write *after* all 4 real Claude calls had
+   already succeeded and cost money. Rather than burn a second real API spend
+   re-running the whole ticket, recovered the already-computed decision from the
+   failed execution's own stored run data and completed the write via n8n's
+   "retry from node with error" once the credential was fixed — real spend: 1
+   ticket's worth of Agent 1-4 calls, not 2. This is Phase 7's last checklist item;
+   everything required by the spec is now genuinely done.
+
+**Follow-up: replaced and re-scoped the write credential.** The credential that failed
+turned out to be borrowed from an unrelated project (n8n-sentiment's own OAuth app) —
+re-authenticating it hit `invalid_client`, meaning that app had been rotated or deleted
+entirely outside this project's control. Rather than depend on someone else's app
+staying alive, gave this workflow its own dedicated OAuth Client ID (Web application
+type) in the same GCP project as the dashboard's read credential. While rebuilding it,
+also trimmed the scope: n8n's Google Sheets OAuth2 credential type defaults to three
+scopes (Drive file management, Drive metadata, and all Sheets) — a "Custom Scopes"
+toggle, present but not shown by default in the credential form, allows overriding
+that down to just `https://www.googleapis.com/auth/spreadsheets`. No narrower,
+single-file scope is reachable through n8n's plain redirect-based OAuth flow (that
+requires the `drive.file` scope plus a browser-based Google Picker consent step, which
+n8n's credential type doesn't support) — same underlying limitation as the dashboard's
+own read credential, and the same mitigation applies: fully revocable in one click,
+not exposed to Drive at all anymore.
