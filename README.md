@@ -1,15 +1,76 @@
 # Complaint Triage Orchestrator (S2.3)
 
 A workflow automation + multi-agent AI orchestration pilot: real CFPB complaint data,
-real federal regulation text, a disclosed synthetic CRM layer, and four genuine
-conditional-tool-use LLM agents (n8n native AI/LLM agent nodes) feeding a deterministic
-escalation gate. Full spec: `../Docs/Complaint_Triage_Orchestrator_Spec.md`.
+real federal regulation text, a disclosed synthetic CRM layer, and four Claude-powered
+conditional-tool-use decision agents — orchestrated in n8n via direct Anthropic API
+calls, not n8n's LangChain AI Agent nodes (see "Why a plain HTTP Request node" below
+for why) — feeding a deterministic escalation gate. Full spec:
+`../Docs/Complaint_Triage_Orchestrator_Spec.md`.
 
-**Status: Phase 7 complete — real Claude API verification run succeeded.** Only the
-real-per-ticket-timing KPI measurement remains open. See Section 15 of the spec for
-the full phase list, and "Phase 7 — the mock-to-real Claude API swap" below for
-exactly what was done, what broke, and how it was fixed.
-(Phase 4's escalation gate was built during Phase 3 — see that section below.)
+**Status: every phase in the spec is complete**, including the real per-ticket timing
+measurement (below). See Section 15 of the spec for the full phase list, and "Phase 7
+— the mock-to-real Claude API swap" below for exactly what was done, what broke, and
+how it was fixed. (Phase 4's escalation gate was built during Phase 3 — see that
+section below.)
+
+**Live dashboard, reading the real Google Sheet on every page load:**
+**[complaint-triage-orchestrator...streamlit.app](https://complaint-triage-orchestrator-2v8axupydgbjue7scerxww.streamlit.app/)**
+
+## What this is
+
+**The problem.** Classifying a complaint, researching the applicable regulation,
+drafting a response, and assessing risk are repetitive but high-stakes tasks — get the
+citation wrong, miss a special-population flag, or auto-send a response that
+shouldn't have gone out, and the failure mode isn't "bad output," it's compliance
+exposure. Blindly automating that with an LLM is unsafe; refusing to automate any of it
+wastes the parts that genuinely are repetitive.
+
+**What was built.** A four-stage AI decision pipeline in n8n: Claude classifies the
+complaint, researches the applicable regulation, drafts a response, then QA-checks its
+own citation and confidence — each stage conditionally reaching for a deterministic
+tool (a taxonomy lookup, a regulation-text fetch, a CRM read) only when the case
+actually calls for it (see "Conditional tool-use" below). All four stages feed a
+**deterministic escalation gate** — explicitly not a fifth AI call, but plain code
+compounding several independent signals (confidence, risk category, complaint history,
+account value, stated monetary exposure) into a hard route: auto-resolve, or human
+queue.
+
+**What makes it different:** AI handles interpretation. Deterministic code handles
+evidence, escalation, and audit.
+
+**What's actually real here, not simulated:**
+- Real CFPB complaint data, fetched live from the public Consumer Complaint Database API
+- Real federal regulation text (FDCPA, FCRA, Regulation Z), sourced verbatim from Cornell LII/CFPB
+- Real Claude API calls for all four agents — not mocked, not templated
+- Real n8n execution, including a genuine autonomous trigger-fired run, not just manual step-through
+- Real Google Sheets persistence, with working Append-or-Update deduplication
+- The live Streamlit dashboard linked above, reading that same real Sheet on every page load
+- A real, measured processing-time comparison (below)
+
+Only the CRM layer is synthetic, and it's disclosed as such everywhere it appears —
+never presented as real customer data (see Section 3c/12 in the spec).
+
+**First real production measurement:** 16.8s automated end-to-end processing vs. the
+sourced ~10 min manual baseline — **9.7 minutes saved per ticket, a 97% reduction.**
+*n=1 — one real timed run, not yet an average. See "Phase 7" below for the full
+methodology, including a Google Sheets credential that expired mid-run, recovered by
+pulling the already-computed decision out of the failed execution's own stored data
+rather than paying for it twice.*
+
+**What broke, for real, along the way:** an n8n HTTP Request node silently replacing an
+item's data instead of merging it, corrupting what downstream agents received; a
+genuinely missing canvas connection that only diffing live API state against source
+JSON caught; a watermark that could never actually advance because two nodes were
+reading and writing two different storage scopes. The build history below documents
+these as they happened, not cleaned up in retrospect.
+
+### Why this matters
+
+This project demonstrates how I approach AI automation in operational environments:
+use LLMs for interpretation, deterministic logic for control, grounded real data for
+evidence, and human escalation wherever risk remains — then measure whether it
+actually worked, and say so plainly when a number (like 17% escalation agreement,
+below) looks worse than it is and needs explaining rather than hiding.
 
 ## Field-claim verification pass (Section 3a/3b, post-v8)
 
