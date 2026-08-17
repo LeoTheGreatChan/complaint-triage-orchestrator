@@ -7,11 +7,11 @@ calls, not n8n's LangChain AI Agent nodes (see "Why a plain HTTP Request node" b
 for why) — feeding a deterministic escalation gate. Full spec:
 `../Docs/Complaint_Triage_Orchestrator_Spec.md`.
 
-**Status: every phase in the spec is complete**, including the real per-ticket timing
-measurement (below). See Section 15 of the spec for the full phase list, and "Phase 7
-— the mock-to-real Claude API swap" below for exactly what was done, what broke, and
-how it was fixed. (Phase 4's escalation gate was built during Phase 3 — see that
-section below.)
+**Status: complete pilot.** All phases in the specification have been implemented and
+verified, including the real end-to-end timing measurement (below). See Section 15 of
+the spec for the full phase list, and "Phase 7 — the mock-to-real Claude API swap"
+below for exactly what was done, what broke, and how it was fixed. (Phase 4's
+escalation gate was built during Phase 3 — see that section below.)
 
 **Live dashboard, reading the real Google Sheet on every page load:**
 **[complaint-triage-orchestrator...streamlit.app](https://complaint-triage-orchestrator-2v8axupydgbjue7scerxww.streamlit.app/)**
@@ -87,7 +87,7 @@ flowchart TD
 Only the CRM layer is synthetic, and it's disclosed as such everywhere it appears —
 never presented as real customer data (see Section 3c/12 in the spec).
 
-**First real production measurement:** 16.8s automated end-to-end processing vs. the
+**First real end-to-end measurement:** 16.8s automated processing vs. the
 sourced ~10 min manual baseline — **9.7 minutes saved per ticket, a 97% reduction.**
 *n=1 — one real timed run, not yet an average. See "Phase 7" below for the full
 methodology, including a Google Sheets credential that expired mid-run, recovered by
