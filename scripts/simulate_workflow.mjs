@@ -28,12 +28,17 @@ const nodesByName = Object.fromEntries(workflow.nodes.map((n) => [n.name, n]));
 
 function runCodeNode(node, items, staticDataStore) {
   const { mode, jsCode } = node.parameters;
-  // n8n's workflow static data is scoped per-node and persists across
-  // executions within a run -- Get Watermark reads/writes it. A plain
-  // in-memory object keyed by node name is a faithful stand-in for the
-  // lifetime of one execute() call (a fresh Node process = a fresh workflow
-  // run, matching "first run, no watermark yet" semantics correctly).
-  const $getWorkflowStaticData = () => (staticDataStore[node.name] ||= {});
+  // n8n's workflow static data is scoped by the type argument -- 'node'
+  // isolates storage per-node, 'global' shares one bucket across the whole
+  // workflow. This distinction is load-bearing, not cosmetic: Get Watermark
+  // and Cap Batch & Advance Watermark only work together if they resolve to
+  // the SAME bucket, which requires both to call 'global'. An earlier stub
+  // here ignored the argument and always keyed by node.name, which silently
+  // matched the two real nodes' original ('node', 'node') bug (isolated,
+  // watermark never actually advances) instead of catching it -- keying by
+  // the argument now means the simulator would have caught that bug, and
+  // correctly proves today's ('global', 'global') fix actually works.
+  const $getWorkflowStaticData = (type) => (staticDataStore[type === "global" ? "__global__" : node.name] ||= {});
   if (mode === "runOnceForAllItems") {
     const $input = { all: () => items.map((it) => ({ json: it })), first: () => ({ json: items[0] }) };
     const fn = new Function("$input", "$getWorkflowStaticData", jsCode);
