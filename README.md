@@ -921,3 +921,7 @@ requires the `drive.file` scope plus a browser-based Google Picker consent step,
 n8n's credential type doesn't support) — same underlying limitation as the dashboard's
 own read credential, and the same mitigation applies: fully revocable in one click,
 not exposed to Drive at all anymore.
+
+---
+
+*Built by Leo Chan · August 2026*
