@@ -1,0 +1,20 @@
+name: Keep Streamlit app awake
+
+# Streamlit Community Cloud puts apps to sleep after a period of no
+# incoming traffic. A periodic request to the app's own URL counts as
+# traffic and resets that timer -- this is not exercising the dashboard's
+# logic, just keeping the hosted app from sleeping.
+on:
+  schedule:
+    - cron: "0 6 */3 * *" # every 3 days at 06:00 UTC -- comfortable margin
+  workflow_dispatch: {} # allows a manual "Run workflow" click too
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the live dashboard
+        run: |
+          curl -sSL --retry 3 --max-time 30 \
+            -o /dev/null -w "HTTP %{http_code}\n" \
+            "https://complaint-triage-orchestrator-2v8axupydgbjue7scerxww.streamlit.app/"
