@@ -16,6 +16,8 @@ escalation gate was built during Phase 3 — see that section below.)
 **Live dashboard, reading the real Google Sheet on every page load:**
 **[complaint-triage-orchestrator...streamlit.app](https://complaint-triage-orchestrator-2v8axupydgbjue7scerxww.streamlit.app/)**
 
+*Third in a three-project portfolio built on the same discipline: start from a real operational problem, decide deliberately where AI is trusted and where control stays in deterministic code, then test, verify, and measure whether it actually worked. [saas-sentiment-analyzer](https://github.com/LeoTheGreatChan/saas-sentiment-analyzer) applies it to live app-store review triage; [ops-analytics-pipeline](https://github.com/LeoTheGreatChan/ops-analytics-pipeline) applies it to a 43,739-row delivery dataset behind a validated delay-risk model. Full portfolio: [github.com/LeoTheGreatChan](https://github.com/LeoTheGreatChan).*
+
 ## What this is
 
 **The problem.** Classifying a complaint, researching the applicable regulation,
