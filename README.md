@@ -13,6 +13,11 @@ the spec for the full phase list, and "Phase 7 — the mock-to-real Claude API s
 below for exactly what was done, what broke, and how it was fixed. (Phase 4's
 escalation gate was built during Phase 3 — see that section below.)
 
+**Phase 8 (proposed, not yet built):** semantic (RAG) regulation retrieval + runtime,
+effective-dated corpus updates — see `S2.3_Phase8_RAG_Addendum.md` in Project
+Knowledge. Does not change anything described below; Phases 1–7 remain complete and
+verified exactly as documented.
+
 **Live dashboard, reading the real Google Sheet on every page load:**
 **[complaint-triage-orchestrator...streamlit.app](https://complaint-triage-orchestrator-2v8axupydgbjue7scerxww.streamlit.app/)**
 
