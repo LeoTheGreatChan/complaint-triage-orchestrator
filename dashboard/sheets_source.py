@@ -75,6 +75,19 @@ def _reshape_row(row: dict) -> dict:
                     "citation": row.get("agent2_citation") or None,
                     "special_population_flag": _parse_bool(row.get("agent2_special_population_flag")),
                 },
+                # Phase 8 addendum Section 6 (dual-signal logging) -- Python
+                # twin of the same fields in export_dashboard_data.mjs's
+                # reshapeSheetRow(). Only present on rows written after that
+                # change shipped, and only ever populated for Product-path
+                # tickets, so absent/"" reads as "not available yet," not a
+                # disagreement.
+                "lexical_top_citation": row.get("lexical_top_citation") or None,
+                "lexical_top_topic": row.get("lexical_top_topic") or None,
+                "semantic_top_citation": row.get("semantic_top_citation") or None,
+                "semantic_top_topic": row.get("semantic_top_topic") or None,
+                "semantic_top_similarity": _parse_number(row.get("semantic_top_similarity")),
+                "semantic_top_effective_date": row.get("semantic_top_effective_date") or None,
+                "lexical_semantic_agree": None if row.get("lexical_semantic_agree", "") == "" else _parse_bool(row.get("lexical_semantic_agree")),
             },
             "agent3": {
                 "tool_used": agent3_tool_used,

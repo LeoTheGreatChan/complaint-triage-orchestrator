@@ -418,6 +418,60 @@ def kpi_citation_accuracy(records):
     return pct, f"{correct}/{len(cited)} cited drafts, QA-verified against real regulation text"
 
 
+def build_phase8_footnote_html(records):
+    """Citation-accuracy footnote (Phase 8 addendum Section 6, build phase
+    7): distinguishes lexical-matched vs. semantic-matched citations for any
+    ticket where the two disagreed, plus which document version (its
+    effective_date) the semantic match was judged against.
+
+    Only Product-path tickets ever carry both signals -- the semantic tool
+    is Product-path-only (addendum Section 6), so Test-path fixtures never
+    populate these fields. A fixture-only data source (the default,
+    simulator-generated dashboard/data/pipeline_log.json) will always hit
+    the "not yet available" branch below; that's disclosed here rather than
+    silently rendering nothing, matching this dashboard's own "small n,
+    nothing padded" ethic. Pure string-building, no Streamlit calls, so it's
+    testable without running the app.
+    """
+    dual = [r for r in records if r["agents"]["agent2"].get("semantic_top_citation")]
+    if not dual:
+        return (
+            '<p class="section-caption"><strong>Phase 8 dual-signal retrieval</strong> (lexical vs. '
+            "semantic) isn't reflected in this data source yet — only real Product-path tickets carry "
+            "both signals, and none have been written to the live Sheet yet. See "
+            "eval/kpi_results.json for a direct, offline comparison of the two tools against 18 "
+            "hand-verified held-out tickets (semantic recall 90% vs. lexical 50%).</p>"
+        )
+
+    disagree = [r for r in dual if r["agents"]["agent2"].get("lexical_semantic_agree") is False]
+    agree_count = sum(1 for r in dual if r["agents"]["agent2"].get("lexical_semantic_agree") is True)
+
+    parts = [
+        '<p class="section-caption"><strong>Phase 8 dual-signal retrieval:</strong> lexical and semantic '
+        f"agreed on {agree_count}/{len(dual)} Product-path ticket(s)."
+    ]
+    if not disagree:
+        parts.append(" No disagreements in this data.</p>")
+        return "".join(parts)
+
+    parts.append(" Disagreements below are logged as both signals, not silently resolved to one:</p>")
+    parts.append('<ul class="section-caption">')
+    for r in disagree:
+        a2 = r["agents"]["agent2"]
+        parts.append(
+            f"<li><strong>{r['complaint_id']}</strong>: lexical matched "
+            f"{a2.get('lexical_top_citation') or '(no match)'}, semantic matched "
+            f"{a2.get('semantic_top_citation') or '(no match)'} "
+            f"(text in force as of {a2.get('semantic_top_effective_date') or 'unknown'})</li>"
+        )
+    parts.append("</ul>")
+    return "".join(parts)
+
+
+def render_phase8_dual_signal_footnote(records):
+    md_html(build_phase8_footnote_html(records))
+
+
 def kpi_escalation_agreement(records):
     # Real, computed -- and expected to read low here. See README/spec
     # Section 8: CFPB's own outcome category is a coarse administrative
@@ -790,6 +844,8 @@ def main():
         render_kpi_card(cols[3], "Escalation agreement", ea_val, ea_sub)
         cat_val, cat_sub = kpi_category_agreement(filtered_records)
         render_kpi_card(cols[4], "Category agreement", cat_val, cat_sub)
+
+        render_phase8_dual_signal_footnote(filtered_records)
 
         st.markdown("<br>", unsafe_allow_html=True)
 

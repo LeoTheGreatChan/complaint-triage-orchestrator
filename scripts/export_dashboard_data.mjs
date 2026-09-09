@@ -106,6 +106,19 @@ function reshapeSheetRow(row) {
           citation: row.agent2_citation || null,
           special_population_flag: parseSheetBool(row.agent2_special_population_flag),
         },
+        // Phase 8 addendum Section 6 (dual-signal logging, build phase 4).
+        // Only present on rows written after that change shipped, and only
+        // ever populated for Product-path tickets (the semantic tool is
+        // Product-path-only) -- undefined/"" on every earlier or Test-path
+        // row, which the dashboard's footnote treats as "not available yet",
+        // not as a disagreement.
+        lexical_top_citation: row.lexical_top_citation || null,
+        lexical_top_topic: row.lexical_top_topic || null,
+        semantic_top_citation: row.semantic_top_citation || null,
+        semantic_top_topic: row.semantic_top_topic || null,
+        semantic_top_similarity: parseSheetNumber(row.semantic_top_similarity),
+        semantic_top_effective_date: row.semantic_top_effective_date || null,
+        lexical_semantic_agree: row.lexical_semantic_agree === "" || row.lexical_semantic_agree === undefined ? null : parseSheetBool(row.lexical_semantic_agree),
       },
       agent3: {
         tool_used: agent3ToolUsed,
