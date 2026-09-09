@@ -54,6 +54,14 @@ const REGULATION_META_INDEX = Object.fromEntries(
   Object.entries(REGULATIONS).map(([id, doc]) => [id, doc._meta])
 );
 
+// Phase 8: the pre-built, pre-embedded semantic corpus (rag/build_corpus.mjs)
+// and the retrieval functions tested standalone in rag/retrieve.js before
+// being trusted here -- see that file's own header for why it's CommonJS
+// specifically (so it can be require()'d here instead of living as a second,
+// separately-typed copy that could drift from what was actually verified).
+const REGULATION_CORPUS = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "rag/corpus/regulation_chunks.json"), "utf-8"));
+const { cosineSimilarity, semanticRetrieve } = require(path.join(REPO_ROOT, "rag/retrieve.js"));
+
 // ===========================================================================
 // Fixture data (spec Section 3a ticket table + Section 3c CRM table, v5
 // special_population_flag values). These stand in for the "Fixture Test
@@ -1059,6 +1067,59 @@ function anthropicAgentNode({ id, name, position, systemPrompt, notes }) {
   };
 }
 
+// Phase 8's one real new external call: embeds a ticket's query text via
+// Voyage's API (voyage-3-large, addendum Section 8) at retrieval time.
+// Same plain-httpRequest reasoning as anthropicAgentNode() above -- one
+// dependency-free call type doesn't need a client library pulled in for
+// it, and it's already proven correct at build time (rag/embed.mjs, which
+// this node's body mirrors: same endpoint, same input_type distinction).
+//
+// Real, hard-won lesson from this exact project (Phase 7's Parse-node
+// data-loss bug, see README "What the real verification run actually
+// found"): an httpRequest node REPLACES $json with the raw response body,
+// it does not merge it with the incoming item -- the ticket data that was
+// on $json before this node runs is gone from $json afterward. The
+// downstream Code node must recover it via
+// $('Tool: Real Regulation Index Lookup').item.json, not $input.item.json,
+// exactly the fix already applied to Real Agent 1-4's own Parse nodes.
+//
+// UNVERIFIED AGAINST A LIVE N8N INSTANCE for this exact node's parameter
+// shape, same honesty flag as anthropicAgentNode() -- confirm the
+// credential wiring and body expression on import.
+const VOYAGE_MODEL = "voyage-3-large";
+
+function voyageEmbedNode({ id, name, position, notes }) {
+  const bodyExpr =
+    "={{ JSON.stringify({ input: [$json.agent2_semantic_query_text], model: " +
+    JSON.stringify(VOYAGE_MODEL) +
+    ", input_type: \"query\" }) }}";
+  return {
+    parameters: {
+      method: "POST",
+      url: "https://api.voyageai.com/v1/embeddings",
+      authentication: "genericCredentialType",
+      genericAuthType: "httpHeaderAuth",
+      sendHeaders: true,
+      headerParameters: {
+        parameters: [{ name: "content-type", value: "application/json" }],
+      },
+      sendBody: true,
+      specifyBody: "json",
+      jsonBody: bodyExpr,
+      options: {},
+    },
+    id, name, type: "n8n-nodes-base.httpRequest", typeVersion: 4.2, position,
+    credentials: {
+      httpHeaderAuth: {
+        id: "REPLACE_WITH_YOUR_VOYAGE_CREDENTIAL_ID",
+        name: "REPLACE_WITH_YOUR_VOYAGE_CREDENTIAL_NAME",
+      },
+    },
+    notesInFlow: true,
+    notes: notes || "",
+  };
+}
+
 // UNTESTED AGAINST A LIVE N8N INSTANCE. This project has no access to a
 // running n8n or Google Sheets credentials to import/execute against, so
 // this node's exact parameter shape (n8n's googleSheets node schema drifts
@@ -1218,7 +1279,46 @@ const ticket = $input.item.json;
 const category = (ticket.agent1_output && (ticket.agent1_output.primary_issue || ticket.agent1_output.issue)) || ticket.issue;
 const queryText = \`\${ticket.issue} \${category} \${ticket.complaint_what_happened || ""}\`;
 const result = regulationIndexLookup(REGULATION_META_INDEX, REGULATION_SEARCH_STOPWORDS, REGULATION_SEARCH_SYNONYMS, REGULATION_SEARCH_PHRASE_SYNONYMS, queryText);
-return { json: { ...ticket, agent2_regulation_tool_result: result } };
+// agent2_semantic_query_text: same query construction, reused verbatim by
+// the Product path's semantic retrieval tool (Phase 8) so lexical and
+// semantic are compared on identical input, not two different queries.
+// Harmless on the Test/mock path too (this jsCode is shared, per the file
+// header's dedup-vs-duplicate-nodes note) -- it's just a string, no API
+// call, so it doesn't touch the mock path's zero-cost guarantee.
+return { json: { ...ticket, agent2_regulation_tool_result: result, agent2_semantic_query_text: queryText } };
+`.trim();
+
+const SEMANTIC_TOP_K = 3;
+
+const jsSemanticRegulationTool = `
+// Tool 2, tier 3 (Phase 8, addendum Section 6/7): semantic (RAG) retrieval,
+// running alongside the lexical tool above as a logged secondary/primary
+// pair -- addendum Section 6 keeps the lexical tool rather than deleting
+// it, since semantic retrieval is harder to explain to a compliance
+// reviewer than a keyword match, and both results get logged so a
+// reviewer can see where they agree or disagree, not just the one
+// selected. Product path only -- the Test/mock path stays genuinely
+// zero-API-cost (its own sticky note's claim), so this tool, which makes
+// a real embedding call one node upstream, is never added there.
+//
+// Real, hard-won lesson from this exact project (Phase 7's Parse-node
+// data-loss bug): the httpRequest node immediately upstream (Voyage's
+// embeddings call) REPLACES $json with its own raw response -- the ticket
+// is gone from $input.item.json here. Recovered via the named-node lookup
+// this project already fixed Real Agent 1-4's own Parse nodes with,
+// rather than re-introducing the same bug a second time.
+const REGULATION_CORPUS_CHUNKS = ${JSON.stringify(REGULATION_CORPUS.chunks)};
+const TOP_K = ${SEMANTIC_TOP_K};
+
+${cosineSimilarity.toString()}
+
+${semanticRetrieve.toString()}
+
+const ticket = $('Tool: Real Regulation Index Lookup').item.json;
+const voyageResponse = $input.item.json;
+const queryEmbedding = voyageResponse.data[0].embedding;
+const result = semanticRetrieve(REGULATION_CORPUS_CHUNKS, queryEmbedding, ticket.date_received, TOP_K);
+return { json: { ...ticket, agent2_semantic_tool_result: result } };
 `.trim();
 
 const jsCrmBroaderTool = `
@@ -1593,6 +1693,8 @@ const nodes = [
   codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000007", name: "Parse: Real Agent 2 Response", mode: "runOnceForEachItem", jsCode: jsParseAgent2Response, position: [1980, 400] }),
   codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000008", name: "Tool: Real Special Population Check", mode: "runOnceForEachItem", jsCode: jsSpecialPopulationTool, position: [2100, 400], notes: "Always runs, every ticket -- same deterministic CRM read as the Test path's tool." }),
   codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000009", name: "Tool: Real Regulation Index Lookup", mode: "runOnceForEachItem", jsCode: jsRegulationIndexTool, position: [2280, 400], notes: "Always runs -- independently cross-checks Real Agent 2's own regulation claim against the real cached corpus." }),
+  voyageEmbedNode({ id: "c3a8e4b2-0001-4000-8000-00000000000e", name: "HTTP Request: Real Semantic Query Embed", position: [2360, 520], notes: "Phase 8. Real Voyage API call -- embeds agent2_semantic_query_text (voyage-3-large, input_type: query) for the semantic retrieval tool below." }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-00000000000f", name: "Tool: Real Semantic Regulation Retrieval", mode: "runOnceForEachItem", jsCode: jsSemanticRegulationTool, position: [2440, 520], notes: "Phase 8 (addendum). Always runs alongside the lexical tool, Product path only -- cosine-similarity top-k against the pre-embedded regulation corpus, effective-dated to the ticket's own filing date." }),
   ifNode({ id: "c3a8e4b2-0001-4000-8000-00000000000a", name: "IF: Real Agent 2 Broader CRM Lookup Used?", leftValueExpr: "={{ $json.agent2_broader_crm_lookup_used }}", position: [2460, 400] }),
   codeNode({ id: "c3a8e4b2-0001-4000-8000-00000000000b", name: "Tool: Real CRM Broader Context Lookup", mode: "runOnceForEachItem", jsCode: jsCrmBroaderTool, position: [2720, 520] }),
   mergeNode({ id: "c3a8e4b2-0001-4000-8000-00000000000c", name: "Merge: Pre-Real Agent 3", position: [2840, 400] }),
@@ -1703,7 +1805,9 @@ const connections = [
   { from: "Real Agent 2: Research", to: "Parse: Real Agent 2 Response", fromOutput: 0 },
   { from: "Parse: Real Agent 2 Response", to: "Tool: Real Special Population Check", fromOutput: 0 },
   { from: "Tool: Real Special Population Check", to: "Tool: Real Regulation Index Lookup", fromOutput: 0 },
-  { from: "Tool: Real Regulation Index Lookup", to: "IF: Real Agent 2 Broader CRM Lookup Used?", fromOutput: 0 },
+  { from: "Tool: Real Regulation Index Lookup", to: "HTTP Request: Real Semantic Query Embed", fromOutput: 0 },
+  { from: "HTTP Request: Real Semantic Query Embed", to: "Tool: Real Semantic Regulation Retrieval", fromOutput: 0 },
+  { from: "Tool: Real Semantic Regulation Retrieval", to: "IF: Real Agent 2 Broader CRM Lookup Used?", fromOutput: 0 },
   { from: "IF: Real Agent 2 Broader CRM Lookup Used?", to: "Tool: Real CRM Broader Context Lookup", fromOutput: 0 },
   { from: "Tool: Real CRM Broader Context Lookup", to: "Merge: Pre-Real Agent 3", fromOutput: 0, toInput: 0 },
   { from: "IF: Real Agent 2 Broader CRM Lookup Used?", to: "Merge: Pre-Real Agent 3", fromOutput: 1, toInput: 1 },
