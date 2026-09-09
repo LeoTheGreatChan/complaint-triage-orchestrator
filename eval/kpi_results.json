@@ -1,0 +1,1013 @@
+{
+  "summary": {
+    "generated_at": "2026-09-09T20:49:42.176Z",
+    "test_set": "eval/held_out_test_set.json",
+    "ticket_count": 18,
+    "positive_count": 10,
+    "negative_count": 8,
+    "kpi_1_and_2_retrieval_recall_and_paraphrase_robustness": {
+      "note": "Addendum Section 3 defines KPI 1 (retrieval recall@k) and KPI 2 (paraphrase robustness) as recall on all tickets vs. recall specifically on the held-out set. This script's only test set IS the held-out set, so these collapse to the SAME number here -- not two independent measurements.",
+      "lexical_recall_unranked": 0.5,
+      "lexical_note": "regulationIndexLookup returns unordered, unscored matches -- there is no meaningful top-1 to isolate, so lexical is reported as a single recall figure (correct citation anywhere in what it returned), not @1/@3.",
+      "semantic_recall_at_1": 0.9,
+      "semantic_recall_at_3": 0.9
+    },
+    "kpi_3_downstream_citation_accuracy": {
+      "measured": false,
+      "finding": "Not re-measured live. Real Agent 2's own LLM call produces applicable_regulation/citation from its own reasoning BEFORE either retrieval tool runs; both lexical and semantic tools run afterward as an independent post-hoc cross-check whose result is never fed back into Agent 2's or Agent 3's prompt (confirmed during Phase 8 build phase 2's live wiring work, and required by the addendum's own non-goal: no change to Phases 1-7's agent call structure). Swapping lexical for semantic therefore cannot change Agent 3's draft citation or the citation-accuracy number already reported for Phases 1-7 under the pipeline as actually built -- running the full 4-agent pipeline on this held-out set (real cost, ~70+ Claude calls across 18 tickets) would only reconfirm that architectural fact, not produce a new one."
+    },
+    "kpi_4_false_positive_rate": {
+      "lexical_false_positive_rate": 0.5,
+      "lexical_note": "Lexical has no confidence score -- 'false positive' means it returned any match at all for a ticket with no real applicable regulation.",
+      "semantic_top1_similarity_on_true_positives": {
+        "mean": 0.6467114009670656,
+        "values": [
+          0.5954364804809112,
+          0.6491090418303043,
+          0.6727922349916668,
+          0.681090554300822,
+          0.6160998083759146,
+          0.691384111878587,
+          0.6592486673416423,
+          0.6430839448601499,
+          0.6121577646435918
+        ]
+      },
+      "semantic_top1_similarity_on_true_negatives": {
+        "mean": 0.6188299735062974,
+        "values": [
+          0.6358235300289082,
+          0.6695755645383586,
+          0.6584371998777163,
+          0.6132653926426594,
+          0.6627710092375098,
+          0.5385943020266123,
+          0.5578232621261957,
+          0.6143495275724193
+        ]
+      },
+      "semantic_note": "Semantic search always returns its top-k by construction (nearest-neighbor search never returns nothing), so a false-positive rate requires a similarity threshold. Reporting the raw distributions on both sides above rather than asserting a threshold decided before seeing this run's actual data -- see console output / README write-up for where they do or don't separate."
+    }
+  },
+  "tickets": [
+    {
+      "complaint_id": "24356064",
+      "product": "Debt collection",
+      "issue": "Electronic communications",
+      "ground_truth": {
+        "applicable_regulation": "FDCPA",
+        "citation": "15 U.S.C. §1692g",
+        "section_keys": [
+          "1692g"
+        ]
+      },
+      "is_positive": true,
+      "lexical": {
+        "matches": [
+          {
+            "citation": "15 U.S.C. §1692g",
+            "topic": "Debt validation notice",
+            "matched_terms": [
+              "validation"
+            ]
+          }
+        ],
+        "match_count": 1,
+        "hit": true,
+        "false_positive": false
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "15 U.S.C. §1692g(a)",
+            "topic": "Debt validation notice",
+            "similarity": 0.5954364804809112,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692g(b)",
+            "topic": "Debt validation notice",
+            "similarity": 0.5662325514717206,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692e(11)",
+            "topic": "False or misleading representations",
+            "similarity": 0.4835284848594245,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": true,
+        "hit_at_3": true,
+        "top1_similarity": 0.5954364804809112
+      }
+    },
+    {
+      "complaint_id": "24355802",
+      "product": "Credit card",
+      "issue": "Problem with a purchase shown on your statement",
+      "ground_truth": {
+        "applicable_regulation": "Regulation Z (FCBA)",
+        "citation": "12 CFR §1026.13",
+        "section_keys": [
+          "1026.13"
+        ]
+      },
+      "is_positive": true,
+      "lexical": {
+        "matches": [],
+        "match_count": 0,
+        "hit": false,
+        "false_positive": false
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "12 CFR §1026.13(f)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6491090418303043,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(a)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6435381875118547,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "Dodd-Frank Act company-response standard",
+            "topic": "Company response deadline",
+            "similarity": 0.6109675260019779,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": true,
+        "hit_at_3": true,
+        "top1_similarity": 0.6491090418303043
+      }
+    },
+    {
+      "complaint_id": "24359148",
+      "product": "Debt collection",
+      "issue": "Attempts to collect debt not owed",
+      "ground_truth": {
+        "applicable_regulation": "FCRA",
+        "citation": "15 U.S.C. §1681c-2",
+        "section_keys": [
+          "1681c-2"
+        ]
+      },
+      "is_positive": true,
+      "lexical": {
+        "matches": [],
+        "match_count": 0,
+        "hit": false,
+        "false_positive": false
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "15 U.S.C. §1692e(2)",
+            "topic": "False or misleading representations",
+            "similarity": 0.5801108653549839,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692e(8)",
+            "topic": "False or misleading representations",
+            "similarity": 0.5778504216537574,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692e(10)",
+            "topic": "False or misleading representations",
+            "similarity": 0.5715034002396918,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": false,
+        "hit_at_3": false,
+        "top1_similarity": 0.5801108653549839
+      }
+    },
+    {
+      "complaint_id": "24357199",
+      "product": "Credit card",
+      "issue": "Closing your account",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "section_keys": []
+      },
+      "is_positive": false,
+      "lexical": {
+        "matches": [
+          {
+            "citation": "Dodd-Frank Act company-response standard",
+            "topic": "Company response deadline",
+            "matched_terms": [
+              "response"
+            ]
+          }
+        ],
+        "match_count": 1,
+        "hit": null,
+        "false_positive": true
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "12 CFR §1026.13(d)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6358235300289082,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(g)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6076767987701338,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(a)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.5887034416611545,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": null,
+        "hit_at_3": null,
+        "top1_similarity": 0.6358235300289082
+      }
+    },
+    {
+      "complaint_id": "24360593",
+      "product": "Debt collection",
+      "issue": "False statements or representation",
+      "ground_truth": {
+        "applicable_regulation": "FDCPA §1692g + §1692e",
+        "citation": "15 U.S.C. §1692g; §1692e",
+        "section_keys": [
+          "1692g",
+          "1692e"
+        ]
+      },
+      "is_positive": true,
+      "lexical": {
+        "matches": [
+          {
+            "citation": "15 U.S.C. §1692g",
+            "topic": "Debt validation notice",
+            "matched_terms": [
+              "notice",
+              "validation"
+            ]
+          },
+          {
+            "citation": "15 U.S.C. §1692e",
+            "topic": "False or misleading representations",
+            "matched_terms": [
+              "false",
+              "misleading",
+              "representation"
+            ]
+          },
+          {
+            "citation": "15 U.S.C. §1681c-2",
+            "topic": "Identity-theft block procedure",
+            "matched_terms": [
+              "block"
+            ]
+          }
+        ],
+        "match_count": 3,
+        "hit": true,
+        "false_positive": false
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "15 U.S.C. §1692e(2)",
+            "topic": "False or misleading representations",
+            "similarity": 0.6727922349916668,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692e(8)",
+            "topic": "False or misleading representations",
+            "similarity": 0.6464191933152876,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692g(a)",
+            "topic": "Debt validation notice",
+            "similarity": 0.6452759896372678,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": true,
+        "hit_at_3": true,
+        "top1_similarity": 0.6727922349916668
+      }
+    },
+    {
+      "complaint_id": "24360443",
+      "product": "Credit card",
+      "issue": "Problem with a purchase shown on your statement",
+      "ground_truth": {
+        "applicable_regulation": "Regulation Z (FCBA)",
+        "citation": "12 CFR §1026.13",
+        "section_keys": [
+          "1026.13"
+        ]
+      },
+      "is_positive": true,
+      "lexical": {
+        "matches": [
+          {
+            "citation": "15 U.S.C. §1692g",
+            "topic": "Debt validation notice",
+            "matched_terms": [
+              "notice"
+            ]
+          },
+          {
+            "citation": "15 U.S.C. §1692e",
+            "topic": "False or misleading representations",
+            "matched_terms": [
+              "present"
+            ]
+          },
+          {
+            "citation": "15 U.S.C. §1681c-2",
+            "topic": "Identity-theft block procedure",
+            "matched_terms": [
+              "identity-theft"
+            ]
+          },
+          {
+            "citation": "12 CFR §1026.13",
+            "topic": "Billing-error resolution procedure",
+            "matched_terms": [
+              "billing",
+              "error",
+              "billing-error",
+              "resolution"
+            ]
+          }
+        ],
+        "match_count": 4,
+        "hit": true,
+        "false_positive": false
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "12 CFR §1026.13(a)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.681090554300822,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(b)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6771911001829801,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(f)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6549695543861414,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": true,
+        "hit_at_3": true,
+        "top1_similarity": 0.681090554300822
+      }
+    },
+    {
+      "complaint_id": "24361136",
+      "product": "Debt collection",
+      "issue": "Attempts to collect debt not owed",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "section_keys": []
+      },
+      "is_positive": false,
+      "lexical": {
+        "matches": [
+          {
+            "citation": "15 U.S.C. §1692g",
+            "topic": "Debt validation notice",
+            "matched_terms": [
+              "notice"
+            ]
+          },
+          {
+            "citation": "12 CFR §1026.13",
+            "topic": "Billing-error resolution procedure",
+            "matched_terms": [
+              "resolution"
+            ]
+          }
+        ],
+        "match_count": 2,
+        "hit": null,
+        "false_positive": true
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "15 U.S.C. §1692g(b)",
+            "topic": "Debt validation notice",
+            "similarity": 0.6695755645383586,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692g(a)",
+            "topic": "Debt validation notice",
+            "similarity": 0.6627106985470016,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692e(11)",
+            "topic": "False or misleading representations",
+            "similarity": 0.6504597770498716,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": null,
+        "hit_at_3": null,
+        "top1_similarity": 0.6695755645383586
+      }
+    },
+    {
+      "complaint_id": "24360872",
+      "product": "Credit card",
+      "issue": "Problem with a purchase shown on your statement",
+      "ground_truth": {
+        "applicable_regulation": "Regulation Z (FCBA)",
+        "citation": "12 CFR §1026.13",
+        "section_keys": [
+          "1026.13"
+        ]
+      },
+      "is_positive": true,
+      "lexical": {
+        "matches": [
+          {
+            "citation": "15 U.S.C. §1681c-2",
+            "topic": "Identity-theft block procedure",
+            "matched_terms": [
+              "identity-theft"
+            ]
+          }
+        ],
+        "match_count": 1,
+        "hit": false,
+        "false_positive": false
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "12 CFR §1026.13(d)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6160998083759146,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(a)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6083194596002696,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(g)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6062904081277305,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": true,
+        "hit_at_3": true,
+        "top1_similarity": 0.6160998083759146
+      }
+    },
+    {
+      "complaint_id": "24361113",
+      "product": "Debt collection",
+      "issue": "Attempts to collect debt not owed",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "section_keys": []
+      },
+      "is_positive": false,
+      "lexical": {
+        "matches": [],
+        "match_count": 0,
+        "hit": null,
+        "false_positive": false
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "15 U.S.C. §1692g(b)",
+            "topic": "Debt validation notice",
+            "similarity": 0.6584371998777163,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692g(a)",
+            "topic": "Debt validation notice",
+            "similarity": 0.645473593807229,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692e(8)",
+            "topic": "False or misleading representations",
+            "similarity": 0.6433154477123599,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": null,
+        "hit_at_3": null,
+        "top1_similarity": 0.6584371998777163
+      }
+    },
+    {
+      "complaint_id": "24361021",
+      "product": "Credit card",
+      "issue": "Closing your account",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "section_keys": []
+      },
+      "is_positive": false,
+      "lexical": {
+        "matches": [],
+        "match_count": 0,
+        "hit": null,
+        "false_positive": false
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "12 CFR §1026.13(a)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6132653926426594,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(b)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6057713640859581,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(h)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.5951953426526523,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": null,
+        "hit_at_3": null,
+        "top1_similarity": 0.6132653926426594
+      }
+    },
+    {
+      "complaint_id": "24361240",
+      "product": "Debt collection",
+      "issue": "False statements or representation",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "section_keys": []
+      },
+      "is_positive": false,
+      "lexical": {
+        "matches": [
+          {
+            "citation": "15 U.S.C. §1692e",
+            "topic": "False or misleading representations",
+            "matched_terms": [
+              "false",
+              "misleading",
+              "representation"
+            ]
+          },
+          {
+            "citation": "12 CFR §1026.13",
+            "topic": "Billing-error resolution procedure",
+            "matched_terms": [
+              "billing"
+            ]
+          }
+        ],
+        "match_count": 2,
+        "hit": null,
+        "false_positive": true
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "15 U.S.C. §1692e(8)",
+            "topic": "False or misleading representations",
+            "similarity": 0.6627710092375098,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692e(2)",
+            "topic": "False or misleading representations",
+            "similarity": 0.6446351468405566,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(f)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6416949430528959,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": null,
+        "hit_at_3": null,
+        "top1_similarity": 0.6627710092375098
+      }
+    },
+    {
+      "complaint_id": "24360954",
+      "product": "Credit card",
+      "issue": "Fees or interest",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "section_keys": []
+      },
+      "is_positive": false,
+      "lexical": {
+        "matches": [],
+        "match_count": 0,
+        "hit": null,
+        "false_positive": false
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "12 CFR §1026.13(g)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.5385943020266123,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(d)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.5199834853166762,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(a)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.5196419603427614,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": null,
+        "hit_at_3": null,
+        "top1_similarity": 0.5385943020266123
+      }
+    },
+    {
+      "complaint_id": "24362733",
+      "product": "Debt collection",
+      "issue": "Written notification about debt",
+      "ground_truth": {
+        "applicable_regulation": "FDCPA",
+        "citation": "15 U.S.C. §1692g",
+        "section_keys": [
+          "1692g"
+        ]
+      },
+      "is_positive": true,
+      "lexical": {
+        "matches": [
+          {
+            "citation": "15 U.S.C. §1692g",
+            "topic": "Debt validation notice",
+            "matched_terms": [
+              "validation"
+            ]
+          }
+        ],
+        "match_count": 1,
+        "hit": true,
+        "false_positive": false
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "15 U.S.C. §1692g(a)",
+            "topic": "Debt validation notice",
+            "similarity": 0.691384111878587,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692g(b)",
+            "topic": "Debt validation notice",
+            "similarity": 0.6818712864998928,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692e(11)",
+            "topic": "False or misleading representations",
+            "similarity": 0.6373598540949332,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": true,
+        "hit_at_3": true,
+        "top1_similarity": 0.691384111878587
+      }
+    },
+    {
+      "complaint_id": "24361482",
+      "product": "Credit card",
+      "issue": "Problem with a purchase shown on your statement",
+      "ground_truth": {
+        "applicable_regulation": "Regulation Z (FCBA)",
+        "citation": "12 CFR §1026.13",
+        "section_keys": [
+          "1026.13"
+        ]
+      },
+      "is_positive": true,
+      "lexical": {
+        "matches": [
+          {
+            "citation": "15 U.S.C. §1692g",
+            "topic": "Debt validation notice",
+            "matched_terms": [
+              "validation"
+            ]
+          },
+          {
+            "citation": "Dodd-Frank Act company-response standard",
+            "topic": "Company response deadline",
+            "matched_terms": [
+              "response"
+            ]
+          }
+        ],
+        "match_count": 2,
+        "hit": false,
+        "false_positive": false
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "12 CFR §1026.13(a)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6592486673416423,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(b)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.5959461821496502,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(f)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.5916551836336966,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": true,
+        "hit_at_3": true,
+        "top1_similarity": 0.6592486673416423
+      }
+    },
+    {
+      "complaint_id": "24363310",
+      "product": "Debt collection",
+      "issue": "Written notification about debt",
+      "ground_truth": {
+        "applicable_regulation": "FDCPA",
+        "citation": "15 U.S.C. §1692g",
+        "section_keys": [
+          "1692g"
+        ]
+      },
+      "is_positive": true,
+      "lexical": {
+        "matches": [],
+        "match_count": 0,
+        "hit": false,
+        "false_positive": false
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "15 U.S.C. §1692g(b)",
+            "topic": "Debt validation notice",
+            "similarity": 0.6430839448601499,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692g(a)",
+            "topic": "Debt validation notice",
+            "similarity": 0.6377509771535141,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(g)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.5489900547757776,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": true,
+        "hit_at_3": true,
+        "top1_similarity": 0.6430839448601499
+      }
+    },
+    {
+      "complaint_id": "24361938",
+      "product": "Credit card",
+      "issue": "Problem with a purchase shown on your statement",
+      "ground_truth": {
+        "applicable_regulation": "Regulation Z (FCBA)",
+        "citation": "12 CFR §1026.13",
+        "section_keys": [
+          "1026.13"
+        ]
+      },
+      "is_positive": true,
+      "lexical": {
+        "matches": [
+          {
+            "citation": "12 CFR §1026.13",
+            "topic": "Billing-error resolution procedure",
+            "matched_terms": [
+              "billing",
+              "error",
+              "billing-error"
+            ]
+          },
+          {
+            "citation": "Dodd-Frank Act company-response standard",
+            "topic": "Company response deadline",
+            "matched_terms": [
+              "response"
+            ]
+          }
+        ],
+        "match_count": 2,
+        "hit": true,
+        "false_positive": false
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "12 CFR §1026.13(a)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6121577646435918,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(f)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.5602478428640977,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "12 CFR §1026.13(h)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.551671822946705,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": true,
+        "hit_at_3": true,
+        "top1_similarity": 0.6121577646435918
+      }
+    },
+    {
+      "complaint_id": "24363652",
+      "product": "Debt collection",
+      "issue": "Communication tactics",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "section_keys": []
+      },
+      "is_positive": false,
+      "lexical": {
+        "matches": [],
+        "match_count": 0,
+        "hit": null,
+        "false_positive": false
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "15 U.S.C. §1692e(8)",
+            "topic": "False or misleading representations",
+            "similarity": 0.5578232621261957,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692e(11)",
+            "topic": "False or misleading representations",
+            "similarity": 0.550448585910095,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692e(14)",
+            "topic": "False or misleading representations",
+            "similarity": 0.5388857752535898,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": null,
+        "hit_at_3": null,
+        "top1_similarity": 0.5578232621261957
+      }
+    },
+    {
+      "complaint_id": "24361964",
+      "product": "Credit card",
+      "issue": "Other features, terms, or problems",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "section_keys": []
+      },
+      "is_positive": false,
+      "lexical": {
+        "matches": [
+          {
+            "citation": "15 U.S.C. §1692g",
+            "topic": "Debt validation notice",
+            "matched_terms": [
+              "notice"
+            ]
+          },
+          {
+            "citation": "15 U.S.C. §1692e",
+            "topic": "False or misleading representations",
+            "matched_terms": [
+              "misleading"
+            ]
+          },
+          {
+            "citation": "15 U.S.C. §1681c-2",
+            "topic": "Identity-theft block procedure",
+            "matched_terms": [
+              "identity-theft"
+            ]
+          },
+          {
+            "citation": "Dodd-Frank Act company-response standard",
+            "topic": "Company response deadline",
+            "matched_terms": [
+              "response"
+            ]
+          }
+        ],
+        "match_count": 4,
+        "hit": null,
+        "false_positive": true
+      },
+      "semantic": {
+        "top3": [
+          {
+            "citation": "12 CFR §1026.13(a)",
+            "topic": "Billing-error resolution procedure",
+            "similarity": 0.6143495275724193,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692e(8)",
+            "topic": "False or misleading representations",
+            "similarity": 0.6120864333890556,
+            "effective_date": "2000-01-01"
+          },
+          {
+            "citation": "15 U.S.C. §1692e(11)",
+            "topic": "False or misleading representations",
+            "similarity": 0.6098818263198835,
+            "effective_date": "2000-01-01"
+          }
+        ],
+        "hit_at_1": null,
+        "hit_at_3": null,
+        "top1_similarity": 0.6143495275724193
+      }
+    }
+  ]
+}
