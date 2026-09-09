@@ -6,6 +6,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "streamlit", "run", "dashboard/app.py", "--server.headless", "true", "--server.port", "8501"],
       "port": 8501
+    },
+    {
+      "name": "n8n",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["n8n"],
+      "port": 5678
     }
   ]
 }
