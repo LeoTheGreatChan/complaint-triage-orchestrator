@@ -701,6 +701,21 @@ function flattenForSheets(record) {
   const sig = record.escalation_signals || {};
   const gt = record.ground_truth || {};
 
+  // Phase 8 addendum Section 6 ("dual-signal logging"): lexical and semantic
+  // retrieval are logged side by side, not just whichever one Agent 2 ended
+  // up citing -- a reviewer needs to see both signals to judge a disputed
+  // citation, especially when they disagree. Only the Product path
+  // populates semantic_tool_result (Phase 8 addendum Section 6: the
+  // semantic tool is Product-path-only); Test-path/mock records simply have
+  // none, so every field below degrades to "" / null rather than throwing.
+  const stripSubclause = (citation) => (citation || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const lexicalCandidates = record.agents.agent2.regulation_tool_result || [];
+  const semanticCandidates = record.agents.agent2.semantic_tool_result || [];
+  const lexicalTop = lexicalCandidates[0] || null;
+  const semanticTop = semanticCandidates[0] || null;
+  const lexicalSemanticAgree =
+    lexicalTop && semanticTop ? stripSubclause(lexicalTop.citation) === stripSubclause(semanticTop.citation) : null;
+
   return {
     complaint_id: record.complaint_id,
     company: record.company,
@@ -715,6 +730,15 @@ function flattenForSheets(record) {
     agent2_citation: a2.citation || "",
     agent2_special_population_flag: a2.special_population_flag ?? "",
     agent2_broader_crm_lookup_used: record.agents.agent2.broader_crm_lookup_used,
+    lexical_top_citation: lexicalTop ? lexicalTop.citation : "",
+    lexical_top_topic: lexicalTop ? lexicalTop.topic : "",
+    semantic_top_citation: semanticTop ? semanticTop.citation : "",
+    semantic_top_topic: semanticTop ? semanticTop.topic : "",
+    semantic_top_similarity: semanticTop ? semanticTop.similarity : "",
+    semantic_top_effective_date: semanticTop ? semanticTop.effective_date : "",
+    lexical_semantic_agree: lexicalSemanticAgree ?? "",
+    lexical_candidates_json: JSON.stringify(lexicalCandidates),
+    semantic_candidates_json: JSON.stringify(semanticCandidates),
     agent3_cites_regulation: a3.cites_regulation ?? "",
     agent3_draft: a3.draft || "",
     agent4_confidence: a4.confidence ?? "",
@@ -901,6 +925,59 @@ function selfTest() {
   }
   if (cRow.complaint_id !== "9999983") failures.push("Ticket C row: complaint_id missing or wrong -- this is the dedup key, must never be blank");
   if (typeof cRow.agent1_tool_used !== "boolean") failures.push(`Ticket C row: agent1_tool_used should be a real boolean for a clean Sheets column, got ${typeof cRow.agent1_tool_used}`);
+
+  // Phase 8 addendum Section 6 (dual-signal logging): Ticket C's own agent2
+  // has neither a lexical nor a semantic tool_result (Test-path shape), so
+  // this also doubles as the "neither signal present" case -- must degrade
+  // to blanks/null, never throw.
+  if (cRow.lexical_top_citation !== "" || cRow.semantic_top_citation !== "") {
+    failures.push(`Ticket C row: expected blank lexical/semantic columns when neither ran, got lexical="${cRow.lexical_top_citation}" semantic="${cRow.semantic_top_citation}"`);
+  }
+  if (cRow.lexical_semantic_agree !== "") failures.push(`Ticket C row: expected lexical_semantic_agree to be blank when neither signal ran, got ${JSON.stringify(cRow.lexical_semantic_agree)}`);
+
+  // Agree case: same base section, different sub-clause specificity (the
+  // lexical tool matches at document level, semantic at clause level) --
+  // stripSubclause must normalize that away rather than call it a disagreement.
+  const agreeRow = flattenForSheets({
+    complaint_id: "TEST-AGREE", company: "Test Co", product: "Debt collection", issue: "Debt validation",
+    decision: "ESCALATE_TO_HUMAN",
+    agents: {
+      agent1: { tool_used: false, output: {} },
+      agent2: {
+        broader_crm_lookup_used: false, output: {},
+        regulation_tool_result: [{ id: "fdcpa_1692g", citation: "15 U.S.C. §1692g", topic: "Debt validation notice", matched_terms: ["validation"] }],
+        semantic_tool_result: [{ chunk_id: "fdcpa_1692g#a", citation: "15 U.S.C. §1692g(a)", topic: "Debt validation notice", effective_date: "2000-01-01", similarity: 0.81 }],
+      },
+      agent3: { tool_used: false, output: null }, agent4: { tool_used: false, output: null },
+    },
+  });
+  if (agreeRow.lexical_semantic_agree !== true) failures.push(`Agree case: expected lexical_semantic_agree true (same base section, different sub-clause), got ${JSON.stringify(agreeRow.lexical_semantic_agree)}`);
+  if (agreeRow.semantic_top_similarity !== 0.81 || agreeRow.semantic_top_effective_date !== "2000-01-01") {
+    failures.push(`Agree case: semantic top similarity/effective_date not carried through, got ${agreeRow.semantic_top_similarity}/${agreeRow.semantic_top_effective_date}`);
+  }
+
+  // Disagree case: lexical and semantic point at different regulations
+  // entirely -- addendum Section 6 requires BOTH get logged, not just one.
+  const disagreeRow = flattenForSheets({
+    complaint_id: "TEST-DISAGREE", company: "Test Co", product: "Credit card", issue: "Billing dispute",
+    decision: "ESCALATE_TO_HUMAN",
+    agents: {
+      agent1: { tool_used: false, output: {} },
+      agent2: {
+        broader_crm_lookup_used: false, output: {},
+        regulation_tool_result: [{ id: "fdcpa_1692e", citation: "15 U.S.C. §1692e", topic: "False or misleading representations", matched_terms: ["misleading"] }],
+        semantic_tool_result: [{ chunk_id: "reg_z_1026_13#a", citation: "12 CFR §1026.13(a)", topic: "Billing-error resolution procedure", effective_date: "2000-01-01", similarity: 0.63 }],
+      },
+      agent3: { tool_used: false, output: null }, agent4: { tool_used: false, output: null },
+    },
+  });
+  if (disagreeRow.lexical_semantic_agree !== false) failures.push(`Disagree case: expected lexical_semantic_agree false, got ${JSON.stringify(disagreeRow.lexical_semantic_agree)}`);
+  if (disagreeRow.lexical_top_citation !== "15 U.S.C. §1692e" || disagreeRow.semantic_top_citation !== "12 CFR §1026.13(a)") {
+    failures.push(`Disagree case: both signals must still be logged even when they disagree, got lexical="${disagreeRow.lexical_top_citation}" semantic="${disagreeRow.semantic_top_citation}"`);
+  }
+  if (!disagreeRow.lexical_candidates_json.includes("1692e") || !disagreeRow.semantic_candidates_json.includes("1026_13")) {
+    failures.push("Disagree case: full candidate JSON columns must carry the raw evidence, not just the top pick's derived fields");
+  }
 
   // Auto-resolve shape (no fixture currently produces one -- see the
   // "untested branches" note -- so this constructs the shape directly to
@@ -1475,6 +1552,7 @@ return {
       agent2: {
         broader_crm_lookup_used: t.agent2_broader_crm_lookup_used, output: t.agent2_output,
         regulation_tool_result: t.agent2_regulation_tool_result, crm_tool_result: t.agent2_crm_tool_result || null,
+        semantic_tool_result: t.agent2_semantic_tool_result || null,
       },
       agent3: { tool_used: t.agent3_tool_used, output: t.agent3_output, tool_result: t.agent3_tool_result || null },
       agent4: { tool_used: t.agent4_tool_used, output: t.agent4_output, tool_result: t.agent4_tool_result || null },
@@ -1497,6 +1575,7 @@ return {
       agent2: {
         broader_crm_lookup_used: t.agent2_broader_crm_lookup_used, output: t.agent2_output,
         regulation_tool_result: t.agent2_regulation_tool_result, crm_tool_result: t.agent2_crm_tool_result || null,
+        semantic_tool_result: t.agent2_semantic_tool_result || null,
       },
       agent3: { tool_used: t.agent3_tool_used, output: t.agent3_output, tool_result: t.agent3_tool_result || null },
       agent4: { tool_used: t.agent4_tool_used, output: t.agent4_output, tool_result: t.agent4_tool_result || null },
@@ -1937,4 +2016,18 @@ function main() {
   console.log(`Wrote ${WORKFLOW_PATH} (${workflow.nodes.length} nodes total, ${nodes.length} owned by this script)`);
 }
 
-main();
+// Guarded so other scripts can require() this file for its lexical-tool
+// constants/function (e.g. eval/measure_kpis.mjs comparing lexical vs.
+// semantic retrieval -- Phase 8 addendum Section 7 build phase 6) without
+// triggering the self-test + full workflow regeneration as a side effect.
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  REGULATION_META_INDEX,
+  REGULATION_SEARCH_STOPWORDS,
+  REGULATION_SEARCH_SYNONYMS,
+  REGULATION_SEARCH_PHRASE_SYNONYMS,
+  regulationIndexLookup,
+};
