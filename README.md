@@ -7,16 +7,19 @@ calls, not n8n's LangChain AI Agent nodes (see "Why a plain HTTP Request node" b
 for why) — feeding a deterministic escalation gate. Full spec:
 `../Docs/Complaint_Triage_Orchestrator_Spec.md`.
 
-**Status: complete pilot.** All phases in the specification have been implemented and
-verified, including the real end-to-end timing measurement (below). See Section 15 of
-the spec for the full phase list, and "Phase 7 — the mock-to-real Claude API swap"
-below for exactly what was done, what broke, and how it was fixed. (Phase 4's
-escalation gate was built during Phase 3 — see that section below.)
+**Status: complete pilot, plus a built and verified Phase 8 extension.** All phases in
+the specification have been implemented and verified, including the real end-to-end
+timing measurement (below). See Section 15 of the spec for the full phase list, and
+"Phase 7 — the mock-to-real Claude API swap" below for exactly what was done, what
+broke, and how it was fixed. (Phase 4's escalation gate was built during Phase 3 — see
+that section below.)
 
-**Phase 8 (proposed, not yet built):** semantic (RAG) regulation retrieval + runtime,
-effective-dated corpus updates — see `S2.3_Phase8_RAG_Addendum.md` in Project
-Knowledge. Does not change anything described below; Phases 1–7 remain complete and
-verified exactly as documented.
+**Phase 8 — built and verified:** semantic (RAG) regulation retrieval running
+alongside the lexical tool, plus runtime, effective-dated corpus updates. Original plan
+in `S2.3_Phase8_RAG_Addendum.md` (same Docs folder as this file); real numbers, what
+broke, and what's still open are in "Phase 8 — semantic retrieval + effective-dated
+corpus updates" below. Additive only — Phases 1–7 remain complete and verified exactly
+as documented.
 
 **Live dashboard, reading the real Google Sheet on every page load:**
 **[complaint-triage-orchestrator...streamlit.app](https://complaint-triage-orchestrator-2v8axupydgbjue7scerxww.streamlit.app/)**
@@ -394,7 +397,10 @@ implemented:
   v6, the Phase 6 dashboard's citation-accuracy metric will need the explicit caveat
   that its ceiling is bounded by this tool's vocabulary coverage, not purely by agent
   reasoning quality — noted here for whichever phase builds that metric, since Phase 3
-  doesn't reach the dashboard.
+  doesn't reach the dashboard. **Measured directly at Phase 8:** a semantic retrieval
+  tool run against 18 held-out tickets recovered 4 of the 5 real citations this lexical
+  tool missed (see "Phase 8" below) — confirming the ceiling named here was real, not
+  hypothetical.
 
 ### Untested branches — all three closed with real tickets, not invented ones (v13)
 
@@ -929,4 +935,154 @@ not exposed to Drive at all anymore.
 
 ---
 
-*Built by Leo Chan · August 2026*
+## Phase 8 — semantic retrieval + effective-dated corpus updates
+
+**Complete — all seven build phases from `S2.3_Phase8_RAG_Addendum.md` shipped and
+verified, including one live bug found and fixed the same way Phase 7's were, and one
+KPI result that came in worse than hoped, reported as such rather than smoothed over.**
+Additive only, per the addendum's own framing — nothing in Phases 1–7 above changed:
+same architecture, same escalation gate, same Test/Product path split. Full technical
+detail (per-ticket comparisons, ingestion tests, live execution IDs) lives in the repo
+under `rag/`, `eval/`, and this file's own git history; this section is the honest
+summary.
+
+### What was built
+
+- **Chunk-and-embed pipeline** (`rag/chunk.mjs`, `rag/embed.mjs`, `rag/build_corpus.mjs`):
+  sequence-aware clause chunking — tracks the top-level enumeration type (letter or
+  digit) and only advances a chunk boundary on the next marker in that exact sequence,
+  absorbing nested/restarted numbering as content — verified against all five real
+  regulation texts before being trusted, not assumed to generalize. Corpus embedded with
+  Voyage `voyage-3-large` (Anthropic's own recommended pairing for Claude-based RAG,
+  chosen after confirming Anthropic itself has no embeddings API). 37 real chunks, zero
+  fabricated text.
+- **Semantic retrieval tool**, wired into the live n8n workflow as two new
+  Product-path-only nodes (`HTTP Request: Real Semantic Query Embed` →
+  `Tool: Real Semantic Regulation Retrieval`) running *alongside*, not replacing, the
+  existing lexical tool — same "log both signals" discipline as everything else in this
+  build. `rag/retrieve.js`'s `semanticRetrieve()` and `cosineSimilarity()` are
+  `.toString()`-embedded into the live Code node exactly as tested, the same pattern
+  this project already uses for every other tool.
+- **Runtime, effective-dated corpus updates** (`rag/ingest.mjs`): a new document's
+  chunks get appended with a real `effective_date`; any prior version of the same
+  `document_id` still in force gets its `superseded_date` set, never deleted.
+  `retrieve.js`'s own filter (`effective_date ≤ ticket_date < superseded_date||now`)
+  does the actual version selection at query time — this script just maintains the
+  data. Verified end-to-end by `rag/test_ingest.mjs` (12/12 checks): a synthetic v1→v2
+  "amendment," run through the real ingestion and retrieval code, correctly resolves to
+  v1 for a ticket dated before the amendment and v2 for one dated on or after it, and a
+  backdated update is rejected outright rather than silently corrupting the timeline.
+  Runs entirely against a throwaway temp corpus seeded with fixtures explicitly labeled
+  "TEST-ONLY — not a real CFPB regulation" — the real 37-chunk corpus was never touched
+  by this test, and was never grown with a fabricated "real-looking" amendment just to
+  have a demo instance either.
+- **Dual-signal logging** (`build_workflow.js`'s `flattenForSheets()`): lexical top
+  match, semantic top match (citation, similarity score, and which document version —
+  by `effective_date` — it was judged against), and an explicit agree/disagree flag now
+  flow into the audit trail, alongside the full candidate arrays as raw JSON columns —
+  so a disagreement between the two tools is visible evidence, not silently resolved to
+  one signal.
+- **Held-out test set + hand-verified ground truth** (`eval/held_out_test_set.json`):
+  18 real CFPB tickets, sourced live from the same public API as the rest of this
+  project, filed strictly *after* the live pipeline's own watermark at sourcing time
+  (2026-07-17) — a structural held-out guarantee, not a best-effort dedup, since the
+  pipeline only ever moves that watermark forward and cannot have already processed
+  anything filed later. Ground truth hand-verified by Leo Chan against each ticket's
+  real narrative, including one ticket where review changed a single citation into a
+  compound one (both a validation-notice and a false-representation claim genuinely
+  applied) and four where a real, explicitly-cited FCRA or FDCPA provision was
+  correctly marked "no match" because the actual applicable section falls outside this
+  pilot's five cached regulations.
+- **Dashboard citation-accuracy footnote** (`dashboard/app.py`'s
+  `build_phase8_footnote_html()`): reports how often lexical and semantic agreed on
+  Product-path tickets, and for any disagreement, both citations side by side plus the
+  semantic match's document version. Currently discloses "not yet reflected in this
+  data source" — honestly, not hidden — because no real Product-path execution has
+  written these columns to the live Sheet yet; verified live against a running Streamlit
+  session reading the real Sheet.
+
+### The live bug this phase found (same discipline as Phase 7's near-misses)
+
+Wiring the semantic tool into the live n8n instance and running it for real failed
+immediately: `Bad request — Input cannot contain empty strings`. Root cause: the
+lexical tool's own Code node (`Tool: Real Regulation Index Lookup`) had been updated in
+the generator to also emit `agent2_semantic_query_text` for the new semantic tool to
+embed — but when the two *new* nodes were pushed to the live canvas, only their own code
+was patched in; the pre-existing lexical node's updated return value never was. The
+semantic tool was therefore trying to embed an empty string every time.
+
+Diagnosed by decoding the failed execution's run data via n8n's REST API (the `flatted`
+double-encoded format this project has decoded before), which showed the exact request
+body Voyage rejected and confirmed the upstream node's output was missing the field
+entirely — not a guess from the error message alone. Fixed by patching that one node's
+live code and re-running only the missing hop via n8n's per-node "Execute step," not a
+full re-run, so the ticket's two already-succeeded real Claude calls (Agent 1, Agent 2)
+were never re-paid for — confirmed by their identical timestamps across the failed and
+retried executions. The corrected pipeline then completed for real: execution #245
+returned three correctly-ranked Regulation Z citations (12 CFR §1026.13(a)/(d)/(f)) for
+a real billing-dispute ticket.
+
+### KPI measurement — real numbers, including the one worse than hoped
+
+Measured with `eval/measure_kpis.mjs` against the 18-ticket held-out set — both tools
+run for real (the lexical tool's actual production function, the semantic tool's actual
+production function plus a real Voyage query embedding per ticket), not reimplemented
+for the test.
+
+| KPI | Lexical | Semantic |
+|---|---|---|
+| Retrieval recall (= paraphrase robustness — this set is entirely held-out) | 50.0% (5/10) | 90.0% (9/10 at both k=1 and k=3) |
+| False-positive rate (of 8 tickets with no real applicable regulation) | 50.0% (4/8 — any spurious keyword match) | No usable threshold exists (below) |
+
+**The win:** semantic recovered 4 of the 5 real citations lexical missed — exactly the
+vocabulary-coverage ceiling the main spec's Section 9 named as this tool's known limit,
+now closed for most cases rather than just documented. The one semantic miss is itself
+informative: an identity-theft ticket's terse, first-person narrative ("someone used my
+social to get cards in my name") semantically resembled "false representation of a
+debt" more than the legally-specific "identity-theft block procedure" — a reminder that
+surface language and legal category aren't always the same thing, even to a real
+embedding model.
+
+**The honest limitation:** false-positive rate has no clean answer for semantic search
+on this data. Mean top-1 similarity on true positives (0.647) barely exceeds true
+negatives (0.619) — and it's worse than that gap suggests: the *highest* true-negative
+similarity (0.670) actually exceeds the *lowest* true-positive similarity (0.595), so no
+single similarity threshold could have correctly separated real matches from
+non-matches across this run. Reported as measured on this 18-ticket set, not
+generalized — the same "state a ceiling and a failure mode alongside any win"
+discipline this README already applies to the escalation-agreement metric (Section 8).
+Retroactively, this validates a design choice already baked into the pipeline before
+this phase started: retrieval output was already wired as advisory audit evidence for
+Agent 2's own LLM judgment, never an autonomous gate — this result is a concrete reason
+that choice matters, not just caution for its own sake.
+
+**Downstream citation-accuracy** (spec Section 9's own metric, which the addendum
+proposed re-measuring) was not re-run live. Real Agent 2's own citation is produced by
+its own LLM reasoning *before* either retrieval tool runs; both tools execute afterward
+as an independent post-hoc cross-check whose result never feeds back into Agent 2's or
+Agent 3's prompt — confirmed while wiring the semantic tool in, and required to stay
+that way by the addendum's own non-goal against changing Phases 1–7's agent call
+structure. Swapping lexical for semantic therefore cannot move that number under the
+pipeline as actually built; running the full 4-agent pipeline on 18 tickets (~70+ real
+Claude calls) would only reconfirm that architectural fact, not add evidence, so that
+spend wasn't made. Full per-ticket detail, including every candidate citation and
+similarity score both tools returned: `eval/kpi_results.json`.
+
+### What's left
+
+- The real Google Sheet has no rows yet carrying the new dual-signal columns — no
+  Product-path execution has completed a real write since this phase's changes landed.
+  The dashboard's footnote already handles this correctly (discloses "not yet
+  reflected" rather than fabricating agreement data) and will start showing real
+  agree/disagree evidence the first time one does.
+- Downstream citation-accuracy (above) is a disclosed non-measurement given the
+  pipeline's current architecture, not an oversight — re-opening it would mean changing
+  Phases 1–7's agent call structure, explicitly out of scope for this addendum.
+- The production regulation corpus stays at its original 37 real chunks. Growing it
+  with a genuine new regulation via `rag/ingest.mjs` is the natural next real-world use
+  of this phase's work, whenever one is actually needed — not simulated here just to
+  populate a demo.
+
+---
+
+*Built by Leo Chan · August–September 2026*
