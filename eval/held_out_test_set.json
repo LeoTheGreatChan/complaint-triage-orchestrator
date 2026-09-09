@@ -1,0 +1,388 @@
+{
+  "_meta": {
+    "description": "Phase 8 addendum Section 7 build phase 5: held-out test set for lexical-vs-semantic retrieval KPI measurement (recall@k, paraphrase robustness, downstream citation accuracy, false-positive rate).",
+    "sourced_at": "2026-09-09",
+    "source": "https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1/ (live CFPB Consumer Complaint Database API, no auth required)",
+    "query": {
+      "product": [
+        "Debt collection",
+        "Credit card"
+      ],
+      "has_narrative": true,
+      "date_received_min": "2026-07-18",
+      "sort": "created_date_asc"
+    },
+    "held_out_guarantee": "Every ticket has date_received > 2026-07-17 (the live n8n pipeline's watermark at sourcing time, read from its own staticData) -- the pipeline can structurally never have already fetched or processed any of these, not just 'probably hasn't.' 0 candidate(s) additionally matched a hardcoded fixture complaint_id and were excluded belt-and-braces (expected to be 0 given the watermark filter already covers it).",
+    "total_candidates_matching_query": 692,
+    "candidates_fetched_this_run": 150,
+    "selected_count": 18,
+    "product_mix": {
+      "Debt collection": 9,
+      "Credit card": 9
+    },
+    "next_step": "Hand-verify ground_truth.applicable_regulation/citation for each ticket below (read complaint_what_happened, judge what actually applies among this pilot's five cached regulations or null if none clearly does) before running Phase 8 build phase 6's KPI measurement against this set.",
+    "ground_truth_status": "Hand-verified by Leo Chan on 2026-09-09 -- all 18 tickets reviewed; 2 (24359148, 24360593) given a specific regulation recommendation different from Claude's draft, the rest confirmed as drafted (a 'null' review means no applicable regulation, not a flagged correction). Ready for Phase 8 build phase 6 (KPI measurement)."
+  },
+  "tickets": [
+    {
+      "complaint_id": "24356064",
+      "product": "Debt collection",
+      "sub_product": "Telecommunications debt",
+      "issue": "Electronic communications",
+      "sub_issue": "Contacted before 8am or after 9pm",
+      "company": "Diversified Adjustment Service, Inc.",
+      "state": "PA",
+      "date_received": "2026-07-19T04:26:07.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with explanation",
+      "complaint_what_happened": "I asked for a debt validation letter still havent received after XXXX months",
+      "ground_truth": {
+        "applicable_regulation": "FDCPA",
+        "citation": "15 U.S.C. §1692g",
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan (confirms Claude's draft). Filed sub_issue is about call timing, but the narrative itself is only about a debt validation letter never received -- same 'narrative overrides filed category' pattern this project already documented for Ticket A. High confidence."
+      }
+    },
+    {
+      "complaint_id": "24355802",
+      "product": "Credit card",
+      "sub_product": "General-purpose credit card or charge card",
+      "issue": "Problem with a purchase shown on your statement",
+      "sub_issue": "Credit card company isn't resolving a dispute about a purchase on your statement",
+      "company": "BARCLAYS BANK DELAWARE",
+      "state": "CA",
+      "date_received": "2026-07-19T03:27:48.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with explanation",
+      "complaint_what_happened": "I disputed a charge after the merchant failed to provide the services as represented and misrepresented the value and usability of the membership. I submitted detailed documentation supporting my dispute, including correspondence with the merchant, evidence of delays in providing access, proof of my cancellation request, screenshots showing lack of availability, and comparative pricing demonstrating that the services were significantly misrepresented. \n\nDespite receiving my dispute and supporting documentation, the company failed to conduct a reasonable investigation. My dispute was denied without meaningfully addressing the evidence I submitted. I was not provided with a detailed explanation of how my evidence was reviewed or why it was rejected. \n\nI believe the company failed to comply with its obligations under applicable consumer protection laws by not conducting a fair and reasonable investigation. I respectfully request that the CFPB require the company to perform a proper review of all submitted evidence, reconsider my dispute, and provide a detailed explanation of the basis for its decision.",
+      "ground_truth": {
+        "applicable_regulation": "Regulation Z (FCBA)",
+        "citation": "12 CFR §1026.13",
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan (confirms Claude's draft). Disputed purchase (merchant misrepresented services), company allegedly failed to conduct a reasonable investigation -- core billing-error-resolution fact pattern. High confidence."
+      }
+    },
+    {
+      "complaint_id": "24359148",
+      "product": "Debt collection",
+      "sub_product": "Credit card debt",
+      "issue": "Attempts to collect debt not owed",
+      "sub_issue": "Debt was result of identity theft",
+      "company": "Credit Control, LLC",
+      "state": "LA",
+      "date_received": "2026-07-19T12:14:46.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with explanation",
+      "complaint_what_happened": "Someone used my social to get cards in my name and now they are saying i must pay a debt i mever created.",
+      "ground_truth": {
+        "applicable_regulation": "FCRA",
+        "citation": "15 U.S.C. §1681c-2",
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan. Identity theft is explicitly the CFPB sub-issue, and the narrative confirms the debt resulted from someone using the consumer's identity -- a clean positive identity-theft match."
+      }
+    },
+    {
+      "complaint_id": "24357199",
+      "product": "Credit card",
+      "sub_product": "Store credit card",
+      "issue": "Closing your account",
+      "sub_issue": "Company closed your account",
+      "company": "CITIBANK, N.A.",
+      "state": "TX",
+      "date_received": "2026-07-19T06:48:45.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with non-monetary relief",
+      "complaint_what_happened": "I am submitting this complaint regarding Citibank 's handling of my Macy 's credit card account and the resulting credit reporting. \n\nI maintained this account for approximately nine years with an excellent payment history. During that time, I consistently paid my account as agreed and had no history of chronic delinquencies. \n\nIn XX/XX/year>, a payment was returned due to what I believe was a minor payment processing issue involving only a small XXXX  difference. Upon becoming aware of the issue, I immediately corrected the payment the following day. Despite my prompt action and my long history of responsible account management, Citibank reported the payment as late. \n\nAfter I exercised my right to dispute the reporting, Citibank closed my account. While I understand that creditors generally have discretion regarding whether to continue extending credit, I am concerned that my account was closed after I exercised my legal right to dispute information I believed was inaccurate or unfair. \n\nI attempted to resolve this matter directly with Citibank, but my concerns were not meaningfully addressed. As a result, the account remains on my credit reports as a creditor-closed account, which continues to negatively impact my credit profile despite nearly a decade of responsible account management. \n\nI respectfully request that Citibank 's Executive Response team conduct a thorough review of my account, including : * The circumstances surrounding the XX/XX/year> payment. \n* The decision to close the account following my dispute. \n* Whether continued reporting of this account fairly reflects my long history of responsible credit use. \n\n\nI appreciate the CFPB forwarding this complaint for executive-level review and request a detailed written response addressing each of the issues raised.",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan (confirms Claude's draft). Dispute is about a creditor closing an account after the consumer disputed a late-payment report -- account-closure/credit-reporting practice, not debt validation, a specific transaction dispute, or identity theft. None of this pilot's 5 cached regulations clearly cover it. Candidate true-negative case."
+      }
+    },
+    {
+      "complaint_id": "24360593",
+      "product": "Debt collection",
+      "sub_product": "Auto debt",
+      "issue": "False statements or representation",
+      "sub_issue": "Attempted to collect wrong amount",
+      "company": "Javitch, Block & Rathbone LLC",
+      "state": "IN",
+      "date_received": "2026-07-19T14:21:09.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with explanation",
+      "complaint_what_happened": "On XX/XX/XXXX, I received a collection notice from Javitch Block LLC attempting to collect an alleged debt on behalf of XXXX XXXX XXXX for a vehicle account. \nExercising my rights under the Fair Debt Collection Practices Act ( FDCPA ), I mailed a formal Debt Validation Request to Javitch Block LLC on XX/XX/XXXX, well within the XXXX dispute window. I sent this letter via postal mail ( XXXX Tracking Number : XXXX. \nJavitch Block LLC completely ignored my timely request and failed to provide any validation, contract, or proof of the alleged debt. Instead of ceasing collection efforts as mandated by law, the creditor updated my Experian credit report on XX/XX/XXXX, reaffirming a negative \" Charge-off '' status. This is a direct violation of the FDCPA. \nFurthermore, XXXX XXXX XXXX and its XXXX are violating the Fair Credit Reporting Act ( FCRA ) by reporting grossly inaccurate and contradictory balances. According to my credit monitoring alerts, this account was reported with a balance of {$11000.00} on XX/XX/XXXX. Then, on XX/XX/XXXX, the reported balance inexplicably changed to {$8900.00}. \nThey are reporting fluctuating, unverified financial figures while simultaneously ignoring legal requests to validate the debt. I have attached the original collection notice, my validation letter, the postal tracking receipt proving they received my dispute, and screenshots of the inconsistent balance reports.",
+      "ground_truth": {
+        "applicable_regulation": "FDCPA §1692g + §1692e",
+        "citation": "15 U.S.C. §1692g; §1692e",
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan. Clear debt-validation request allegedly ignored, plus allegations of inaccurate/contradictory debt reporting -- best multi-regulation positive in this set (same dual-citation convention as this project's own Ticket B fixture)."
+      }
+    },
+    {
+      "complaint_id": "24360443",
+      "product": "Credit card",
+      "sub_product": "General-purpose credit card or charge card",
+      "issue": "Problem with a purchase shown on your statement",
+      "sub_issue": "Credit card company isn't resolving a dispute about a purchase on your statement",
+      "company": "CITIBANK, N.A.",
+      "state": "NY",
+      "date_received": "2026-07-19T14:52:41.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with monetary relief",
+      "complaint_what_happened": "Subject : FORMAL BILLING ERROR DISPUTE & NOTICE OF FRAUD REVERSION Reference : Rejection Letter Dated XX/XX/XXXX To Whom It May Concern, I am writing to formally dispute your XX/XX/XXXX, determination and reassert that the charges debited from my account between XX/XX/XXXX and XX/XX/XXXX are entirely fraudulent. I did not authorize, make, or benefit from any of these transactions. I have not used this card since XX/XX/XXXX. \n1. Statement Disconnect and Concealed Activity I was prevented from discovering this fraud earlier due to a severe system error on your part. Month after month, my email statements explicitly stated \" no new charges. '' An account representative recently confirmed that my email alerts were erroneously linked to an inactive, old card ending in XXXX. Because your system masked the actual activity, my XXXX function automatically debited the fraudulent balances from my personal bank account without my knowledge or consent. \nXXXX. Disputed Fraudulent Amounts The total amount stolen via your billing error and unauthorized bank debits is {$310.00} : XX/XX/XXXX XX/XX/XXXX : {$250.00} ( Accumulated fraudulent transactions ) XX/XX/XXXX : {$59.00} ( Final fraudulent transaction and debit ) XXXX. Proof of Non-Involvement Your XX/XX/XXXX claim that I \" benefited from or was aware of '' these charges is factually impossible and incorrect : Physical Distance : The XX/XX/XXXX charges occurred at a location XXXX miles away from my residence. I was not physically present at that merchant. \nNo Digital Footprint : The charges include digital services such as \" XXXX XXXX '' and adult entertainmentXXXX I maintain absolutely no online presence with these platforms, do not use these services, and have no accounts tied to them. \n4. Remedial Actions Taken Upon discovering your system error and the unauthorized charges, I immediately : Removed the XXXX link to protect my bank account. \nFlagged the account with your fraud department in early XXXX when I noticed a debit for {$59.00}. \nHad a new card issued to secure the account. \n5. Demand for Resolution Under the Fair Credit Billing Act ( XXXX ), I am requesting a full, formal re-investigation of this account. Because your company failed to provide accurate statements, the standard 60-day notification window must be adjusted to reflect the date the billing error was actually made available to me. \nPlease credit {$310.00} back to my account immediately or issue a direct refund check for the funds wrongfully debited from my bank account.",
+      "ground_truth": {
+        "applicable_regulation": "Regulation Z (FCBA)",
+        "citation": "12 CFR §1026.13",
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan (confirms Claude's draft). Consumer explicitly invokes the Fair Credit Billing Act by name, disputes fraudulent charges, and references the 60-day notification window -- as clean a match to this cached regulation as the test set has. High confidence."
+      }
+    },
+    {
+      "complaint_id": "24361136",
+      "product": "Debt collection",
+      "sub_product": "Other debt",
+      "issue": "Attempts to collect debt not owed",
+      "sub_issue": "Debt is not yours",
+      "company": "FAIR COLLECTIONS & OUTSOURCING, INC.",
+      "state": "PA",
+      "date_received": "2026-07-19T16:12:40.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with explanation",
+      "complaint_what_happened": "Issue : Debt Collection I am filing this complaint regarding Fair Collections & Outsourcings ( FCO ) attempt to collect an alleged {$91.00} electric utility debt that I was never made aware of until more than one year after I had vacated my apartment.\n\nI moved out of the apartment approximately three years ago. At the time I vacated the property, I was never provided with a final utility bill, notice of an outstanding balance, or any communication indicating that I owed money to the utility provider. Had I been notified of a legitimate balance, I would have promptly paid a {$91.00} obligation and avoided any collection activity. \n\nInstead, my first notice of this alleged debt came more than a year after I had already moved out, when I was informed that the account had been placed with a third-party debt collector. As a result, I was deprived of a reasonable opportunity to review, verify, or resolve the alleged balance directly with the original creditor before it was referred to collections. \n\nTo date, I have not been provided with documentation demonstrating that I was properly billed for this alleged balance before the account was referred for collection. I have not received the original utility bill, an itemized account statement, or documentation showing when and how the original creditor attempted to notify me of the alleged debt. \n\nConsumers should receive timely notice of any outstanding balance and be given a fair opportunity to resolve it before being subjected to third-party collection efforts. In this case, that did not occur. The lack of timely notice prevented me from addressing the matter when it could have been resolved quickly and without unnecessary collection activity. \nGiven that I was not informed of this alleged debt until more than a year after vacating the property, I believe it is unfair and unreasonable to pursue collection under these circumstances. I respectfully request that the CFPB review this matter and require Fair Collections & Outsourcing to provide an appropriate resolution consistent with applicable consumer protection laws.",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan. The debt was allegedly discovered late, but there is no actual formal validation request -- do not infer §1692g merely from the absence of documentation. Treated as a hard negative."
+      }
+    },
+    {
+      "complaint_id": "24360872",
+      "product": "Credit card",
+      "sub_product": "General-purpose credit card or charge card",
+      "issue": "Problem with a purchase shown on your statement",
+      "sub_issue": "Credit card company isn't resolving a dispute about a purchase on your statement",
+      "company": "CITIBANK, N.A.",
+      "state": "TX",
+      "date_received": "2026-07-19T15:39:19.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with monetary relief",
+      "complaint_what_happened": "I am filing a complaint regarding Citibanks handling of fraudulent charges on my XXXX XXXX credit card. \n\nApproximately three months ago, I noticed numerous unauthorized transactions on my account and immediately contacted Citibank to report them. I was told the charges would be disputed and that I did not need to make a payment while the investigation was pending.\n\nOver the following three months, I checked my account multiple times and found that additional unauthorized charges continued appearing. Each time I called Citibank, I was again assured that the fraud investigation would be handled and that I did not need to pay the disputed balance. The following are the dates that I called Citibank and was told that the charges would be properly handled : XXXX initial report, under {$100.00} in charges at this time XXXX hundreds of dollars in continuous fraudulent charges, assured that it was being investigated XXXX $ XXXX in fraudulent charges, assured that it was being investigated XXXX XXXX in charges still not resolved, was recieving daily calls several times a day being told to pay my bill. Called asking them if this would affect my credit score. Was assured that i did not need to pay my bill. \nXXXX still receiving 4+ calls a day telling me to pay my bill. Now charges are at XXXX because of interest and late fees. Called and was told that only some charges have been disputed, and that i need to contact a department that wont be open until Monday. \nXXXX noticed a XXXX point drop in my credit score Despite these repeated assurances, no meaningful action was taken. The balance continued to grow to approximately {$850.00}, including interest and late fees. I also began receiving repeated collection calls demanding payment. Most concerning, Citibank reported the account as delinquent to the credit bureaus, causing my credit score to drop by approximately XXXX points. \n\nI relied on Citibanks repeated instructions that I should not make payments while the fraud investigation was pending. Instead of resolving the fraud, the bank allowed the account to become delinquent and reported negative information that has damaged my credit.",
+      "ground_truth": {
+        "applicable_regulation": "Regulation Z (FCBA)",
+        "citation": "12 CFR §1026.13",
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan (confirms Claude's draft). Ongoing fraud-charge dispute; company allegedly kept assuring no payment was required during investigation, then reported the account delinquent anyway -- billing-error-resolution-procedure fact pattern (including the improper-derogatory-reporting-during-dispute angle). High confidence."
+      }
+    },
+    {
+      "complaint_id": "24361113",
+      "product": "Debt collection",
+      "sub_product": "Credit card debt",
+      "issue": "Attempts to collect debt not owed",
+      "sub_issue": "Debt was paid",
+      "company": "TRANSUNION INTERMEDIATE HOLDINGS, INC.",
+      "state": "TX",
+      "date_received": "2026-07-19T16:17:36.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with explanation",
+      "complaint_what_happened": "XXXX XXXX XXXX XXXX. \nCredit Reporting Department Re : Request for Investigation and Deletion of Account To Whom It May Concern, I am writing to dispute the accuracy and completeness of the information being reported on the above-referenced account under the Fair Credit Reporting Act ( 15 U.S.C. 1681s-2 and 1681i ).\n\nThis account is currently reported as : Closed {$0.00} Balance Payment After Charge-Off/Collection Extensive derogatory payment history I dispute the accuracy and completeness of this reporting and request that your company conduct a reasonable investigation.\n\nPlease provide : A copy of the original signed application or electronic agreement.\n\nThe complete payment history from the date the account was opened until it was closed.\n\nDocumentation supporting each reported late payment.\n\nThe Date of First Delinquency.\n\nDocumentation supporting the reported charge-off.\n\nDocumentation demonstrating that all information furnished to the consumer reporting agencies is complete and accurate.\n\nIf you are unable to verify the information with competent evidence, I request that this account be deleted from Equifax, Experian, and TransUnion .\n\nPlease provide the results of your investigation and copies of all documents relied upon.",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan. Genuine FCRA dispute, but the relevant provisions are §1681s-2 / §1681i, outside the narrower cached identity-theft regulation."
+      }
+    },
+    {
+      "complaint_id": "24361021",
+      "product": "Credit card",
+      "sub_product": "Store credit card",
+      "issue": "Closing your account",
+      "sub_issue": "Company closed your account",
+      "company": "SYNCHRONY FINANCIAL",
+      "state": "GA",
+      "date_received": "2026-07-19T15:53:31.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with explanation",
+      "complaint_what_happened": "On XX/XX/year>, I tried to make a purchase on XXXX using my XXXX XXXX XXXX issued by Synchrony Bank and discovered the account had been closed on XX/XX/year>. \nWhen I called Synchrony to ask why the account was closed, I was only told there was a vague credit problem, even though my XXXX XXXX has remained above XXXX the entire time. I also requested a refund of the {$36.00} credit balance from an accidental overpayment. \nI called again later the same day to request a clearer explanation. This time I was told the reason was high risk activity. When I asked to speak with a supervisor for a more specific answer, the agent hung up on me. \nI have not received the specific principal reasons for the account closure or the {$36.00} refund. I am requesting that Synchrony provide the detailed reasons in writing and issue the {$36.00} credit balance refund",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan (confirms Claude's draft). Account-closure customer-service dispute (unclear reason given, refund request) -- no debt collection, billing-error, or identity-theft element. None of the 5 cached regulations apply. Candidate true-negative case."
+      }
+    },
+    {
+      "complaint_id": "24361240",
+      "product": "Debt collection",
+      "sub_product": "I do not know",
+      "issue": "False statements or representation",
+      "sub_issue": "Attempted to collect wrong amount",
+      "company": "TRANSUNION INTERMEDIATE HOLDINGS, INC.",
+      "state": "MI",
+      "date_received": "2026-07-19T16:35:34.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with explanation",
+      "complaint_what_happened": "I am disputing the XXXX XXXX account being reported on my XXXX  and TransUnion credit reports. The account is inaccurate and I am requesting a complete investigation and verification of all information being furnished. \n\nPlease provide documentation supporting this account, including : The original service agreement or contract Complete itemized billing records Proof of the amount claimed to be owed The date of first delinquency Documentation showing the account status and reporting history are accurate I am requesting that XXXX XXXX verify that all information being reported complies with the Fair Credit Reporting Act ( FCRA ), including the accuracy, completeness, and consistency of the information being furnished to consumer reporting agencies. \n\nIf the account can not be verified with proper documentation, I request that the inaccurate information be corrected or removed from my credit reports. \n\nSincerely, XXXX XXXX",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan. Same principle as 24361113: a genuine FCRA accuracy/reinvestigation issue, but outside the cached corpus."
+      }
+    },
+    {
+      "complaint_id": "24360954",
+      "product": "Credit card",
+      "sub_product": "Store credit card",
+      "issue": "Fees or interest",
+      "sub_issue": "Problem with fees",
+      "company": "SYNCHRONY FINANCIAL",
+      "state": "TN",
+      "date_received": "2026-07-19T15:53:49.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with explanation",
+      "complaint_what_happened": "I used my carecredit card for a purchase woth my dentist. My promotion ended XXXX of XXXX  and it was not paid in full at that time. As I had a rough financial time and had missed payments in XXXX  I had finally been able to pay my balance of XXXX in full on XX/XX/year> prior to my due date and posted to my account prior to my due date. I was then charged interest after my full payment and was told that it was residual interest from my promotional balance that had ended 6 months prior, why was that not charged at the end of the promotion balance? I paid my balance in full by the due date and they continue to charge interest...... \nThey also continued to lower my credit limit when I did make payments and would make my credit usage to XXXX XXXX had a limit of XXXX then went to XXXX after a payment and then down to XXXX while they kept charging fees and interest of my credit limit for their card. They adjusted my available limit almost on a monthly basis and continued to lower my credit score and affect my credit score by adjusting my availability limit and showing that I had gone over that much. I had tried to call and couldn't reach someone that spoke English clearly and they just basically read off a list of responses..... I truly feel Care Credit has horrible practices and putting those thst cant pay cash for dental services or other Healthcare and forced to use their services as the dentist doesnt accept other companies that work the same only care credit so there is a monopoly of the services as well. Care credit is charging people for things that are not right and messing with people 's credit scores that affects other areas of their lives.\n\nPlease investigate care credit and their practices as I at this time am refusing to pay interest charges that I was charged after i paid my account in full before due date.",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan. Residual promotional interest and credit-limit changes do not clearly fit the cached regulations -- a Reg Z semantic trap / hard negative, not a real match."
+      }
+    },
+    {
+      "complaint_id": "24362733",
+      "product": "Debt collection",
+      "sub_product": "Credit card debt",
+      "issue": "Written notification about debt",
+      "sub_issue": "Didn't receive enough information to verify debt",
+      "company": "CITIBANK, N.A.",
+      "state": "NE",
+      "date_received": "2026-07-19T19:14:23.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with explanation",
+      "complaint_what_happened": "I talking to a customer representative in their own chat service on their website. sent a formal request for WRITTEN debt validation on the XXXX of XX/XX/year> as per 15 USC 1692 G listing.\n\n1. I want a detailed list of all payments made to the account by me.\n\n2. I want proof of a signature made by me on the original contract guaranteeing I would pay the creditor.\n\n3. If there have been any insurance claims found on alleged debt.\n\n4. I asked for proof of the proper chain of title to collect this debt.\n\nI then informed them as per section 809 under the FDCPA they have 30 days to comply by mail and that as such all debt collection practices must cease until validation is proven to ME. \n\nOn XX/XX/XXXX, and XX/XX/XXXX, MCM attempted contact by phone to collect the debt and gain the attempted contact by email to collect the debt. and by mail. which are all violations of the FDCPA and fineable by {$1000.00} per incident. and am list as to file a formal complaint",
+      "ground_truth": {
+        "applicable_regulation": "FDCPA",
+        "citation": "15 U.S.C. §1692g",
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan (confirms Claude's draft). Consumer explicitly cites '15 USC 1692 G' and FDCPA section 809 by name, sent a written validation demand. As clean a match to this cached regulation as the test set has. High confidence."
+      }
+    },
+    {
+      "complaint_id": "24361482",
+      "product": "Credit card",
+      "sub_product": "General-purpose credit card or charge card",
+      "issue": "Problem with a purchase shown on your statement",
+      "sub_issue": "Credit card company isn't resolving a dispute about a purchase on your statement",
+      "company": "CITIBANK, N.A.",
+      "state": "FL",
+      "date_received": "2026-07-19T16:04:06.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with monetary relief",
+      "complaint_what_happened": ".I live in Florida and purchased a XXXX XXXX XXXX online from Bloomingdale 's for {$290.00} using my Bloomingdale 's XXXX XXXX XXXX. The order ( # XXXX ) was placed on XX/XX/year>, and shipped directly to my daughter at her apartment in New York so she could wear it to my son 's graduation. XXXX marked the package as delivered on XX/XX/year>, but my daughter never received it. The only proof of delivery provided stated XXXX XXXX XXXX NY '' and did not include a signature, delivery photograph, apartment number, recipient name, or any evidence that the package was delivered to the correct address. When I attempted to file a claim with UPS, I was informed that the recipient was not permitted to file a claim and that the claim had to be initiated by the shipper. I then made repeated efforts to resolve the matter directly with Bloomingdale 's, but those efforts were unsuccessful. I disputed the charge with Citibank, but on XX/XX/year>, the dispute was denied based on the conclusion that the merchandise had been delivered. I then submitted a detailed written request for reconsideration, with supporting documentation, by fax and certified mail. Although the fax was successfully transmitted and USPS confirmed receipt of my certified letter, I never received any acknowledgment or substantive response to my reconsideration or my request for an explanation of the evidence relied upon in denying my dispute. I made every reasonable effort to resolve this matter before seeking assistance from the CFPB because my documented request for reconsideration was never meaningfully addressed.",
+      "ground_truth": {
+        "applicable_regulation": "Regulation Z (FCBA)",
+        "citation": "12 CFR §1026.13",
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan (confirms Claude's draft). Non-delivery of a purchased item (one of the FCBA's own enumerated billing-error categories), dispute denied without adequate explanation, reconsideration request ignored. High confidence."
+      }
+    },
+    {
+      "complaint_id": "24363310",
+      "product": "Debt collection",
+      "sub_product": "Medical debt",
+      "issue": "Written notification about debt",
+      "sub_issue": "Didn't receive enough information to verify debt",
+      "company": "Ability Recovery Services, LLC",
+      "state": "LA",
+      "date_received": "2026-07-19T20:14:50.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with explanation",
+      "complaint_what_happened": "I have called the company and attempted to obtain information pertaining to the original date of service, the location of the service, who the service was provided for, anything. They were unable to provide anything at that time. \nI disputed this on my credit report as well. \nThe company has been unable or unwilling to provide anything verifying the original debt before it was purchased by their company. \nAdditionally, at this point, I dont believe they should even be pursuing payment on this account due to the age of the original debt.",
+      "ground_truth": {
+        "applicable_regulation": "FDCPA",
+        "citation": "15 U.S.C. §1692g",
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan (confirms Claude's draft). Company unable/unwilling to verify the original debt (date, location, provider) before or after it was purchased by a collector -- debt-validation fact pattern, though no formal 30-day letter is mentioned. Moderate-high confidence."
+      }
+    },
+    {
+      "complaint_id": "24361938",
+      "product": "Credit card",
+      "sub_product": "General-purpose credit card or charge card",
+      "issue": "Problem with a purchase shown on your statement",
+      "sub_issue": "Credit card company isn't resolving a dispute about a purchase on your statement",
+      "company": "BARCLAYS BANK DELAWARE",
+      "state": "MD",
+      "date_received": "2026-07-19T17:26:14.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with explanation",
+      "complaint_what_happened": "I am submitting this complaint regarding Barclays Bank Delawares handling of dispute case XXXX involving a disputed transaction of {$140.00}. My complaint is that Barclays denied my billing dispute without meaningfully evaluating whether I actually received the service I paid for. \n\nI purchased tickets to the XXXX XXXX XXXX XXXX XXXX event. Although my tickets were scanned upon arrival, event staff failed to provide the required wristbands needed for continued access to the event. Because of that failure, I was denied continued access almost immediately after entering, and staff could not correct the issue because my tickets had already been marked as used. \n\nThe merchants response did not address these facts. Instead, it argued only that my tickets had been scanned and that ticket sales were non-refundable. Barclays accepted this response without addressing whether I actually received the service purchased. A scanned ticket alone is not evidence that the contracted service was delivered when the customer is subsequently denied access due to the venues own check-in error. \n\nI also provided Barclays documentation showing that the merchant inaccurately stated I had never contacted them regarding the issue. While this was not the primary basis of my dispute, it raised additional concerns regarding the reliability of the merchants response. \n\nAfter Barclays denied the dispute, I submitted additional evidence, requested reconsideration, and filed a formal complaint. Barclays responded that the matter had been reviewed and was closed, but did not explain how it concluded that the service had been delivered or address the issues I raised.",
+      "ground_truth": {
+        "applicable_regulation": "Regulation Z (FCBA)",
+        "citation": "12 CFR §1026.13",
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan (confirms Claude's draft). Disputed transaction (service/access not actually delivered as agreed), issuer denied the dispute without meaningfully investigating whether the service was received. High confidence."
+      }
+    },
+    {
+      "complaint_id": "24363652",
+      "product": "Debt collection",
+      "sub_product": "Credit card debt",
+      "issue": "Communication tactics",
+      "sub_issue": "Frequent or repeated calls",
+      "company": "CITIBANK, N.A.",
+      "state": "OH",
+      "date_received": "2026-07-19T21:03:18.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with explanation",
+      "complaint_what_happened": "Citibank on behalf of Best Buy has been calling repeatedly throughout the day starting promptly at XXXX XXXX. This is causing a significant amount of stress and anxiety. I understand there is a 7 in 7 rule, which is clearly being intentionally violated as they call as many as 7 times on a daily basis. They have called a total of 27 times in the past 7 days and today isnt over yet. I receive these calls while driving, during meetings at family and social functions etc which is also embarrassing. At this time, Im merely late on payment and up until now have not been late in more than 3 years.",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan. Genuine collection-harassment issue, but the relevant FDCPA provision is §1692d, outside the cached corpus."
+      }
+    },
+    {
+      "complaint_id": "24361964",
+      "product": "Credit card",
+      "sub_product": "General-purpose credit card or charge card",
+      "issue": "Other features, terms, or problems",
+      "sub_issue": "Problem with customer service",
+      "company": "WELLS FARGO & COMPANY",
+      "state": "FL",
+      "date_received": "2026-07-19T17:44:08.000Z",
+      "timely": "Yes",
+      "company_response": "Closed with explanation",
+      "complaint_what_happened": "Formal CFPB Dispute Narrative To : Wells Fargo Bank , N.A . XXXX XXXX XXXX XXXX XXXX RE : Willful FCRA Violation, Deceptive Trade Practices, and Failure to Verify Consumer Authorization XXXX. Statement of Facts & Material Omissions On XX/XX/year>, I submitted a digital request for a routine Credit Limit Increase ( CLI ) on my Wells Fargo credit card account ending in XXXX. The Wells Fargo app/user interface, application flow, and submission screens completely lacked any clear and conspicuous disclosure stating that this action would trigger a hard inquiry on my credit profile. A decade-long course of dealing across multiple financial institutions, including prior actions with Wells Fargo , established a clear baseline that routine credit limit increases are evaluated via soft inquiries unless explicit, affirmative consent for a hard pull is requested and granted. I never granted such consent. \n\nXXXX. Failed Internal Investigation & Refusal to Produce Documentation Upon identifying the unauthorized hard inquiry on my credit file, I immediately contacted Wells Fargo and exhausted your internal escalation chain of command. Representatives from Wells Fargo issued a final determination claiming that I \" authorized '' the hard pull. \n\nI explicitly requested that Wells Fargo provide the specific terms and conditions authorizing this hard credit pull, along with the precise documentation or digital audit logs proving my authorization for this credit limit increase. Wells Fargo has completely failed to provide it. \n\nXXXX. Legal and Regulatory Deficiencies A financial institution can not legally claim a \" permissible purpose '' under the Fair Credit Reporting Act ( FCRA ), 15 U.S.C. 1681b, based on an unverified, unsubstantiated assertion of digital consent. Maintaining that an authorization exists while refusing or failing to produce the documentary evidence upon a formal consumer request demonstrates a facially unreasonable investigation and constitutes a willful violation of federal law. \n\nXXXX. Clear Demand & Notice of Intent to Litigate If Wells Fargo possesses a legally binding, clear, and conspicuous disclosure that I signed or checked on XX/XX/year>, you are required to produce it in response to this complaint. \n\nIf Wells Fargo can not or will not produce the definitive digital XXXX XXXX proving explicit consent within fifteen ( XXXX ) business days, I demand that your corporate office issue an immediate electronic deletion code to Equifax, Experian, and TransUnion to scrub this unauthorized inquiry from my consumer credit files. \n\nPlease accept this complaint as formal notice that if this unauthorized inquiry is not removed promptly, I will bypass further administrative bureaucracy and move this matter directly to formal civil litigation. I will pursue full actual damages, statutory and punitive damages for willful non-compliance under 15 U.S.C. 1681n, and all available attorney 's fees. Consider this your final opportunity to cure this violation.",
+      "ground_truth": {
+        "applicable_regulation": null,
+        "citation": null,
+        "verified_by": "Leo Chan",
+        "verified_at": "2026-09-09",
+        "notes": "Verified by Leo Chan. Genuine FCRA permissible-purpose issue under §1681b, but that provision is outside the cached corpus."
+      }
+    }
+  ]
+}
