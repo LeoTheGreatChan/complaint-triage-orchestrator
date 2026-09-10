@@ -1,10 +1,10 @@
 # Complaint Triage Orchestrator (S2.3)
 
-A workflow automation + multi-agent AI orchestration pilot: real CFPB complaint data,
+A workflow automation and multi-agent AI orchestration pilot: real CFPB complaint data,
 real federal regulation text, a disclosed synthetic CRM layer, and four Claude-powered
-conditional-tool-use decision agents — orchestrated in n8n via direct Anthropic API
-calls, not n8n's LangChain AI Agent nodes (see "Why a plain HTTP Request node" below
-for why) — feeding a deterministic escalation gate. Full spec:
+agents with conditional tool use — orchestrated in n8n via direct Anthropic API calls,
+not n8n's LangChain AI Agent nodes (see "Why a plain HTTP Request node" below for why)
+— feeding a deterministic escalation gate. Full spec:
 `../Docs/Complaint_Triage_Orchestrator_Spec.md`.
 
 **Status: complete pilot, plus built and verified Phase 8 and Phase 9 extensions.**
@@ -13,6 +13,10 @@ timing measurement (below). See Section 15 of the spec for the full phase list, 
 "Phase 7 — the mock-to-real Claude API swap" below for exactly what was done, what
 broke, and how it was fixed. (Phase 4's escalation gate was built during Phase 3 — see
 that section below.)
+
+**In one line:** Phase 8 added semantic retrieval alongside the existing lexical
+lookup; Phase 9 changed the architecture so that retrieved regulatory evidence actively
+grounds Agent 2's decision, instead of only checking it afterward.
 
 **Phase 8 — built and verified:** semantic (RAG) regulation retrieval running
 alongside the lexical tool, plus runtime, effective-dated corpus updates. Original plan
@@ -42,9 +46,11 @@ wastes the parts that genuinely are repetitive.
 
 **What was built.** A four-stage AI decision pipeline in n8n: Claude classifies the
 complaint, researches the applicable regulation, drafts a response, then QA-checks its
-own citation and confidence — each stage conditionally reaching for a deterministic
-tool (a taxonomy lookup, a regulation-text fetch, a CRM read) only when the case
-actually calls for it (see "Conditional tool-use" below). All four stages feed a
+own citation and confidence. Each agent can conditionally call a deterministic tool (a
+taxonomy lookup, a regulation-text fetch, a CRM read) only when the case actually calls
+for it (see "Conditional tool-use" below) — the one exception is regulation retrieval
+itself, a mandatory evidence-gathering stage that runs before Agent 2 on every ticket,
+not a tool Agent 2 discretionarily calls. All four stages feed a
 **deterministic escalation gate** — explicitly not a fifth AI call, but plain code
 compounding several independent signals (confidence, risk category, complaint history,
 account value, stated monetary exposure) into a hard route: auto-resolve, or human
@@ -66,8 +72,12 @@ flowchart TD
 
     subgraph RET["Retrieval — always runs before Agent 2 (Phase 9)"]
         direction LR
-        RT1[Tool: Special-Population Check] --> RT2[Tool: Regulation Index — lexical]
-        RT2 --> RT3[Tool: Semantic Retrieval — embedding]
+        RT1[Tool: Special-Population Check] --> RR
+
+        subgraph RR["Regulation Retrieval"]
+            direction LR
+            RT2[Lexical strategy: keyword index] --> RT3[Semantic strategy: embedding search]
+        end
     end
     RET --> S2
 
@@ -102,6 +112,20 @@ Agent 2 grounds its citation in what the Retrieval stage found (or explicitly de
 or flags it as outside the cached corpus) — see "Phase 9 — RAG-benefits-decision
 restructure" below for what that replaced and why.
 
+### RAG in practice — a real ticket, not a hypothetical
+
+Complaint 25183526 (CITIBANK, N.A., a credit-card fee dispute): both the lexical and
+semantic tools retrieved the same candidate, Reg Z §1026.13 — the billing-error
+resolution procedure. A candidate being retrieved isn't the same as it applying, and
+this is exactly that case: §1026.13 only governs a *formal* billing-error dispute, and
+the complaint's own record shows no evidence the consumer ever filed one. Agent 2 was
+told this distinction explicitly in its prompt, and correctly declined to cite the
+retrieved candidate rather than reaching for the closest available match. Agent 4,
+reasoning independently, reached the same conclusion in its own words: *"there is no
+evidence the consumer initiated a formal billing-error dispute under 12 CFR
+§1026.13."* Full trace, including the real API responses at every stage: "Verified
+against one real execution" under Phase 9 below.
+
 **What's real here:**
 - Real CFPB complaint data, fetched live from the public Consumer Complaint Database API
 - Real federal regulation text (FDCPA, FCRA, Regulation Z), sourced verbatim from Cornell LII/CFPB
@@ -114,12 +138,13 @@ restructure" below for what that replaced and why.
 Only the CRM layer is synthetic, and it's disclosed as such everywhere it appears —
 never presented as real customer data (see Section 3c/12 in the spec).
 
-**First real end-to-end measurement:** 16.8s automated processing vs. the
-sourced ~10 min manual baseline — **9.7 minutes saved per ticket, a 97% reduction.**
-*n=1 — one real timed run, not yet an average. See "Phase 7" below for the full
-methodology, including a Google Sheets credential that expired mid-run, recovered by
-pulling the already-computed decision out of the failed execution's own stored data
-rather than paying for it twice.*
+**Measured on one real end-to-end run:** 16.8s automated processing versus a sourced
+~10-minute manual baseline — equivalent to **9.7 minutes saved per ticket, a 97%
+reduction.** *n=1, not yet an average — stated plainly so the percentage isn't read as
+an established production result. See "Phase 7" below for the full methodology,
+including a Google Sheets credential that expired mid-run, recovered by pulling the
+already-computed decision out of the failed execution's own stored data rather than
+paying for it twice.*
 
 **What broke, for real, along the way:** an n8n HTTP Request node silently replacing an
 item's data instead of merging it, corrupting what downstream agents received; a
