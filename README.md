@@ -62,14 +62,22 @@ flowchart TD
         direction LR
         A1[Claude call] -.->|conditional| A1T[Tool: Taxonomy Lookup]
     end
-    S1 --> S2
+    S1 --> RET
+
+    subgraph RET["Retrieval — always runs before Agent 2 (Phase 9)"]
+        direction LR
+        RT1[Tool: Special-Population Check] --> RT2[Tool: Regulation Index — lexical]
+        RT2 --> RT3[Tool: Semantic Retrieval — embedding]
+    end
+    RET --> S2
 
     subgraph S2["Agent 2 — Research"]
         direction LR
-        A2[Claude call] -->|always| A2T[Tool: Regulation Index + Special-Population Check]
-        A2 -.->|conditional| A2T2[Tool: Broader CRM Lookup]
+        A2[Claude call] -.->|conditional| A2T2[Tool: Broader CRM Lookup]
     end
+    S2 -.->|if citation grounded| GC[Tool: Grounding Clause Fetch]
     S2 --> S3
+    GC --> S3
 
     subgraph S3["Agent 3 — Drafting"]
         direction LR
@@ -89,6 +97,10 @@ flowchart TD
     I --> J
     J --> K[Live Streamlit Dashboard]
 ```
+
+Agent 2 grounds its citation in what the Retrieval stage found (or explicitly declines,
+or flags it as outside the cached corpus) — see "Phase 9 — RAG-benefits-decision
+restructure" below for what that replaced and why.
 
 **What's real here:**
 - Real CFPB complaint data, fetched live from the public Consumer Complaint Database API
