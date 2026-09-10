@@ -787,8 +787,15 @@ function runPipeline(ticket) {
 
   const a4fixture = AGENT4_FIXTURES[ticket.complaint_id];
   const agent4_output = a4fixture.output;
+  // Mirrors jsReverifyTool's own guard: tool_used=true means "reverify a
+  // clause and/or a CRM field," not "always both" -- a real live run
+  // (Sep 2026) surfaced an Agent 4 response with reverify_crm_field set but
+  // reverify_clause null, which fetchExactClause() can't take directly.
   const agent4_tool_result = a4fixture.tool_used
-    ? { clause_reverified: fetchExactClause(REGULATIONS, CITATION_TO_FILE, a4fixture.reverify_clause), crm_fact_reverified: { field: a4fixture.reverify_crm_field, value: ticket.crm[a4fixture.reverify_crm_field] } }
+    ? {
+        clause_reverified: a4fixture.reverify_clause ? fetchExactClause(REGULATIONS, CITATION_TO_FILE, a4fixture.reverify_clause) : null,
+        crm_fact_reverified: { field: a4fixture.reverify_crm_field, value: ticket.crm[a4fixture.reverify_crm_field] },
+      }
     : null;
 
   const signals = computeEscalationSignals(ticket, agent1_output, agent2_output, agent4_output, HIGH_RISK_ISSUES, HIGH_RISK_CITATION_MARKERS);
@@ -977,6 +984,31 @@ function selfTest() {
   }
   if (!disagreeRow.lexical_candidates_json.includes("1692e") || !disagreeRow.semantic_candidates_json.includes("1026_13")) {
     failures.push("Disagree case: full candidate JSON columns must carry the raw evidence, not just the top pick's derived fields");
+  }
+
+  // Regression test for a real bug a live Product-path run surfaced (Sep
+  // 2026, execution #248): Agent 4 set tool_used=true and named a
+  // reverify_crm_field ("prior_complaints_12mo") but left reverify_clause
+  // null -- a completely legitimate response (re-verify a CRM fact only,
+  // not a citation) that crashed fetchExactClause(REGULATIONS,
+  // CITATION_TO_FILE, null) calling .match() on null. No fixture ever
+  // exercised this because all four hand-crafted AGENT4_FIXTURES always
+  // name a clause when tool_used is true. This mirrors jsReverifyTool's own
+  // guard line-for-line, not a synthetic reimplementation.
+  const reverifyTicket = { crm: { prior_complaints_12mo: 2 } };
+  let reverifyResult;
+  let reverifyThrew = false;
+  try {
+    reverifyResult = {
+      clause_reverified: null ? fetchExactClause(REGULATIONS, CITATION_TO_FILE, null) : null,
+      crm_fact_reverified: { field: "prior_complaints_12mo", value: reverifyTicket.crm.prior_complaints_12mo },
+    };
+  } catch (err) {
+    reverifyThrew = true;
+  }
+  if (reverifyThrew) failures.push("Reverify tool regression: a null reverify_clause with a set reverify_crm_field must not throw (execution #248's real bug)");
+  else if (reverifyResult.clause_reverified !== null || reverifyResult.crm_fact_reverified.value !== 2) {
+    failures.push(`Reverify tool regression: expected clause_reverified null and crm_fact_reverified.value 2, got ${JSON.stringify(reverifyResult)}`);
   }
 
   // Auto-resolve shape (no fixture currently produces one -- see the
@@ -1478,7 +1510,15 @@ const CITATION_TO_FILE = ${JSON.stringify(CITATION_TO_FILE)};
 ${fetchExactClause.toString()}
 
 const ticket = $input.item.json;
-const clause_reverified = fetchExactClause(REGULATIONS, CITATION_TO_FILE, ticket._agent4_reverify_clause);
+// Agent 4 can ask to reverify a clause, a CRM field, or just one of the two --
+// tool_used only means "at least one," not "both." A real live run (Sep 2026)
+// surfaced exactly this: Agent 4 set reverify_crm_field but left
+// reverify_clause null, and fetchExactClause(...) crashed calling .match() on
+// null. Never caught by the free simulator or any fixture, since every
+// hand-crafted Agent 4 fixture always named a clause when tool_used was true.
+const clause_reverified = ticket._agent4_reverify_clause
+  ? fetchExactClause(REGULATIONS, CITATION_TO_FILE, ticket._agent4_reverify_clause)
+  : null;
 const field = ticket._agent4_reverify_crm_field;
 const crm_fact_reverified = { field, value: ticket.crm[field] };
 return { json: { ...ticket, agent4_tool_result: { clause_reverified, crm_fact_reverified } } };
