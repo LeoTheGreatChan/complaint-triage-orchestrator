@@ -7,8 +7,8 @@ calls, not n8n's LangChain AI Agent nodes (see "Why a plain HTTP Request node" b
 for why) — feeding a deterministic escalation gate. Full spec:
 `../Docs/Complaint_Triage_Orchestrator_Spec.md`.
 
-**Status: complete pilot, plus a built and verified Phase 8 extension.** All phases in
-the specification have been implemented and verified, including the real end-to-end
+**Status: complete pilot, plus built and verified Phase 8 and Phase 9 extensions.**
+All phases in the specification have been implemented and verified, including the real end-to-end
 timing measurement (below). See Section 15 of the spec for the full phase list, and
 "Phase 7 — the mock-to-real Claude API swap" below for exactly what was done, what
 broke, and how it was fixed. (Phase 4's escalation gate was built during Phase 3 — see
@@ -18,8 +18,13 @@ that section below.)
 alongside the lexical tool, plus runtime, effective-dated corpus updates. Original plan
 in `S2.3_Phase8_RAG_Addendum.md` (same Docs folder as this file); real numbers, what
 broke, and what's still open are in "Phase 8 — semantic retrieval + effective-dated
-corpus updates" below. Additive only — Phases 1–7 remain complete and verified exactly
-as documented.
+corpus updates" below. Additive at the time — Phase 9 (next) is what changed that.
+
+**Phase 9 — built and verified:** retrieval restructured to actually ground Agent 2's
+citation instead of only auditing it afterward, the way Phase 8 left it. Not additive —
+this changes the Phase 1–7 agent call structure Phase 8 explicitly left alone. Full
+write-up, the real execution it was verified against, and two real bugs it found: "Phase
+9 — RAG-benefits-decision restructure" below.
 
 **Live dashboard, reading the real Google Sheet on every page load:**
 **[complaint-triage-orchestrator...streamlit.app](https://complaint-triage-orchestrator-2v8axupydgbjue7scerxww.streamlit.app/)**
@@ -998,7 +1003,10 @@ summary.
   semantic match's document version. Currently shows an explicit "not yet reflected in
   this data source" note, since no real Product-path execution has written these
   columns to the live Sheet yet; verified live against a running Streamlit session
-  reading the real Sheet.
+  reading the real Sheet. **Superseded by Phase 9 (see below):** this function was
+  renamed to `build_retrieval_grounding_footnote_html()` and rewritten to report
+  citation-grounding outcomes instead, once lexical/semantic agreement stopped being
+  the thing that mattered.
 
 ### The live bug this phase found (same discipline as Phase 7's near-misses)
 
@@ -1053,19 +1061,26 @@ discipline this README already applies to the escalation-agreement metric (Secti
 Retroactively, this validates a design choice already baked into the pipeline before
 this phase started: retrieval output was already wired as advisory audit evidence for
 Agent 2's own LLM judgment, never an autonomous gate — this result is a concrete reason
-that choice matters, not just caution for its own sake.
+that choice matters, not just caution for its own sake. **Superseded by Phase 9 (see
+below):** that choice held through Phase 8, but Phase 9 deliberately reversed it —
+retrieval became the thing Agent 2 grounds a citation in, with a deterministic backstop
+that can force escalation on its own.
 
 **Downstream citation-accuracy** (spec Section 9's own metric, which the addendum
-proposed re-measuring) was not re-run live. Real Agent 2's own citation is produced by
-its own LLM reasoning *before* either retrieval tool runs; both tools execute afterward
-as an independent post-hoc cross-check whose result never feeds back into Agent 2's or
-Agent 3's prompt — confirmed while wiring the semantic tool in, and required to stay
-that way by the addendum's own non-goal against changing Phases 1–7's agent call
-structure. Swapping lexical for semantic therefore cannot move that number under the
-pipeline as actually built; running the full 4-agent pipeline on 18 tickets (~70+ real
-Claude calls) would only reconfirm that architectural fact, not add evidence, so that
-spend wasn't made. Full per-ticket detail, including every candidate citation and
-similarity score both tools returned: `eval/kpi_results.json`.
+proposed re-measuring) was not re-run live at Phase 8. Real Agent 2's own citation was
+produced by its own LLM reasoning *before* either retrieval tool ran; both tools
+executed afterward as an independent post-hoc cross-check whose result never fed back
+into Agent 2's or Agent 3's prompt — confirmed while wiring the semantic tool in, and
+required to stay that way by the addendum's own non-goal against changing Phases 1–7's
+agent call structure. Swapping lexical for semantic therefore couldn't move that number
+under the pipeline as it was built at the time; running the full 4-agent pipeline on 18
+tickets (~70+ real Claude calls) would only have reconfirmed that architectural fact,
+not added evidence, so that spend wasn't made. Full per-ticket detail, including every
+candidate citation and similarity score both tools returned: `eval/kpi_results.json`.
+**Superseded by Phase 9 (see below):** the non-goal this paragraph describes was
+Phase 8's own scope boundary, not a permanent constraint — Phase 9 explicitly changed
+the agent call structure this paragraph says can't change, moving retrieval before
+Agent 2 specifically so its output *would* feed back into the prompt.
 
 ### What's left
 
@@ -1081,6 +1096,133 @@ similarity score both tools returned: `eval/kpi_results.json`.
   with a genuine new regulation via `rag/ingest.mjs` is the natural next real-world use
   of this phase's work, whenever one is actually needed — not simulated here just to
   populate a demo.
+
+This list is a snapshot of where Phase 8 actually left off, not a standing summary —
+**the first two items above were resolved by Phase 9**, which follows immediately
+below: the Sheet now carries real grounding data, and the "out of scope" architecture
+constraint was the thing Phase 9 was built to lift. The corpus-size item is still open.
+
+## Phase 9 — RAG-benefits-decision restructure
+
+**Complete.** Phase 8 wired semantic retrieval in as a parallel audit trail, logged
+alongside Agent 2's decision but never read by it — a real execution's own run data
+confirmed this directly: the retrieval fields sat in the record next to a citation that
+disagreed with both of them, and nothing downstream ever noticed. Phase 9 restructures
+retrieval to actually feed the decision instead of just watching it, verified against
+one real live execution and retroactively applied to the four earlier Product-path
+tickets already in the Sheet.
+
+### What was built
+
+- **Retrieval moved before Agent 2.** The Product-path node order is now Special
+  Population Check → Regulation Index Lookup (lexical) → Voyage Embed → Semantic
+  Regulation Retrieval, all ahead of Real Agent 2: Research — reversing Phase 8's order,
+  where Agent 2 ran first and both retrieval tools ran afterward as a pure cross-check.
+- **Agent 2 grounds its citation in what retrieval actually found, or declines.** Its
+  prompt now receives both candidate lists directly and is told explicitly that a
+  candidate being retrieved doesn't mean it applies — retrieval surfaces textually or
+  semantically similar provisions, not legal relevance, so Agent 2 still has to judge
+  the facts. If a real regulation applies but neither tool surfaced it, Agent 2 says so
+  (`outside_cached_corpus=true`) rather than silently citing from its own knowledge as
+  if retrieval had confirmed it.
+- **A deterministic backstop for Agent 2's self-report.** `isCitationGroundedInRetrieval()`
+  (`build_workflow.js`) independently checks Agent 2's citation's base section against
+  every candidate *both* tools returned, not just the top pick — catches the case where
+  Agent 2 forgot to flag `outside_cached_corpus` itself. It's a structural check, not a
+  legal-relevance judgment: it can only tell whether a citation's base section shows up
+  anywhere in what was retrieved, never whether a candidate actually fits the facts.
+- **Agent 3 cites Agent 2's grounded text verbatim, or not at all.** A new node, `Tool:
+  Real Grounding Clause Fetch`, independently re-fetches the real cached text of
+  whatever Agent 2 grounded its citation in *before* Agent 3 drafts — Agent 3 is
+  instructed to copy that exact citation or omit one, never substitute a different
+  subsection or regulation of its own.
+- **Agent 4 is told about both grounding flags**, since a deterministic check downstream
+  already forces human review on either one and Agent 4 doesn't need to re-derive that
+  — but it's asked to name the flag in its own reason text if it notices one, rather
+  than reasoning about the draft's accuracy as if an unverified citation were confirmed.
+- **Two new escalation conditions, OR-only.** `isOutsideCachedCorpus` and
+  `isCitationUngrounded` join the escalation gate, verified against every existing
+  Test-path fixture to only ever *add* an escalation, never remove one — both signals
+  default to `false`/`null` on fixtures that never set them, so no existing fixture
+  expectation had to change.
+- **Explicitly out of scope**, by direct instruction: the multi-regulation array
+  proposed alongside this restructure.
+- **Dashboard rewritten to match.** Phase 8's "did lexical and semantic agree" footnote
+  and per-ticket badge described a comparison that stopped being the interesting
+  question once retrieval started shaping the decision — replaced with a
+  grounding-outcome view (`Grounded` / `No regulation applies` / `Flagged` / `No
+  retrieval used`). Went through two more rounds after the first rewrite: an early
+  version repeated the same sentence once per flagged ticket, duplicating detail the
+  per-ticket badge already carried; a later one led with a bare "0 confirmed" count that
+  read as the system not working, when the real story was the opposite — every
+  unverifiable citation had been caught and routed to a human, not shipped. Internal
+  build-phase numbers ("Phase 7," "Phase 9") are kept out of every user-facing dashboard
+  string on direct request — a reader shouldn't need this README to read their own
+  dashboard.
+- **Retroactive backfill.** The four Product-path tickets already logged before this
+  restructure shipped never had `citation_not_in_retrieval` computed at all. Recomputed
+  it for all four using the exact deterministic formula above, against their
+  already-stored retrieval candidates — real data, not a guess — and wrote the result to
+  the live Sheet. `outside_cached_corpus` stays blank for these four: it's Agent 2's own
+  self-report, and there's no way to reconstruct what an LLM call would have said
+  without re-asking it. None of the four decisions changed; all four were already
+  `ESCALATE_TO_HUMAN`.
+
+### Verified against one real execution
+
+Complaint 25183526 (CITIBANK, N.A., a credit-card fee dispute with an empty narrative):
+both retrieval tools surfaced the same candidate, Reg Z §1026.13 (billing-error
+resolution) — and Agent 2 correctly declined to cite it, because the record shows no
+evidence the consumer ever filed a formal billing-error dispute, which §1026.13
+specifically governs. Agent 4 independently reached the same conclusion in its own
+words ("Agent 2 correctly determined that no applicable regulation applies to this
+complaint... there is no evidence the consumer initiated a formal billing-error dispute
+under 12 CFR §1026.13") and separately flagged the draft itself as too generic,
+escalating for human review. `outside_cached_corpus` and `citation_not_in_retrieval`
+both correctly read `false` — nothing was ungrounded, because nothing was cited.
+
+### Two real problems this phase found
+
+1. **A self-inflicted expression-syntax bug, live-patching the n8n canvas.** Each
+   generator-authored `httpRequest` JSON Body is a template literal starting with a
+   literal `=` (n8n's own marker for "the rest of this string is an expression").
+   Typing that literal `=` into the canvas's Expression-mode editor double-counted it —
+   n8n already prepends its own `=` in that mode, so the stored value became
+   `==<expression>`, which evaluates to a literal `=` glued onto the intended JSON
+   string and fails to parse. Confirmed by comparing
+   the failing node's raw editor content, character by character, against an
+   already-working node's — the working one's editor started with `{{`, not `={{`.
+   Fixed by deleting the one stray leading character on each affected node, without
+   touching anything else. Real cost: this bug survived two live execution attempts
+   before being found, each re-paying for Agent 1 and Agent 2's already-succeeded real
+   Claude calls (nothing here re-uses a failed run's upstream cost automatically) — a
+   concrete argument for verifying an edited field's *actual stored value*, not just
+   that it looks right in the editor, before re-running.
+2. **A stale read on the deployed dashboard, independent of any code bug.** After this
+   phase's code and the real Sheet backfill both landed, the production Streamlit
+   Community Cloud deployment kept showing zero grounded tickets — the exact "not yet
+   reflected" empty state, on data that had been correct in the Sheet and on the local
+   dashboard for a while. Same code, same spreadsheet, same credentials class (a
+   read-only Google OAuth client), different result — pointing at a stale read cached by
+   that specific deployed process rather than anything wrong in the code or the Sheet.
+   Resolved by a manual reboot of the deployed app, which forced a fresh process and a
+   fresh fetch; no code change was needed. Documented here because it's a real,
+   observed case of a live dashboard silently disagreeing with its own source of truth
+   for reasons entirely outside the codebase — worth checking for before assuming a
+   data or logic bug when "local" and "production" disagree.
+
+### What's left
+
+- `isCitationGroundedInRetrieval()`'s structural check only recognizes citation patterns
+  for this pilot's four already-cached documents (FDCPA §1692e/g, FCRA §1681c-2, Reg Z
+  §1026.13). A citation to any other real regulation — even one Agent 2 identifies
+  correctly — reads as ungrounded, because the check has no pattern to match it against,
+  not because the check found it wrong. This is disclosed behavior, not a hidden gap:
+  the four Product-path tickets backfilled above all hit exactly this case. Widening the
+  pattern match to the corpus's full citation list (`CITATION_TO_FILE`'s keys, rather
+  than a hand-picked regex) is the natural next fix.
+- The production regulation corpus is still the same 37 real chunks / 4 documents named
+  above — same open item carried over from Phase 8.
 
 ---
 
