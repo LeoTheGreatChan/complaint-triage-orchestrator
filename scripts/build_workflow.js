@@ -495,7 +495,7 @@ const REGULATION_SEARCH_STOPWORDS = new Set([
 ]);
 const REGULATION_SEARCH_SYNONYMS = {
   fraud: "identity-theft", fraudulent: "identity-theft", identity: "identity-theft",
-  theft: "identity-theft", unauthorized: "identity-theft", stolen: "identity-theft",
+  theft: "identity-theft", stolen: "identity-theft",
   false: "misleading", deceptive: "misleading", misrepresentation: "misleading",
   wrong: "billing-error", incorrect: "billing-error", error: "billing-error",
   validate: "validation", validating: "validation",
@@ -506,8 +506,19 @@ const REGULATION_SEARCH_SYNONYMS = {
 // Section 9's note) rather than invented in the abstract, so the known
 // citation matches (Ticket B/C -> FCRA identity-theft block procedure) hold
 // even when the exact wording drifts slightly on a real ticket.
+//
+// "unauthorized" deliberately does NOT trigger identity-theft on its own
+// (removed here, and from REGULATION_SEARCH_SYNONYMS above, after a real
+// Product-path run -- Phase 9 -- surfaced two false positives: Agent 1
+// classified a fee dispute as "Unauthorized or incorrect fees charged" and a
+// wrong-charge complaint as "Unauthorized credit card charge," and this
+// single word alone sent both to the identity-theft-block citation even
+// though neither ticket involved identity theft or a credit report. An
+// unrecognized/unwanted CHARGE is not the same claim as a stolen IDENTITY --
+// the phrase list below now only fires on language that's actually about
+// identity theft, not merely about something the consumer didn't authorize.
 const REGULATION_SEARCH_PHRASE_SYNONYMS = [
-  { phrases: ["fraudulent", "not mine", "don't recognize", "do not recognize", "identity theft", "unauthorized"], addsTerm: "identity-theft" },
+  { phrases: ["fraudulent", "not mine", "don't recognize", "do not recognize", "identity theft", "stole my identity", "stolen identity"], addsTerm: "identity-theft" },
   { phrases: ["didn't receive", "did not receive", "never received", "never got", "never sent", "no notice", "without notice"], addsTerm: "validation" },
 ];
 
@@ -553,6 +564,42 @@ function fetchExactClause(regulations, citationToFile, citation) {
   if (endIdx === -1) endIdx = text.length;
 
   return { found: true, citation, subsection: letter, clause_text: text.slice(startIdx, endIdx).trim(), source_citation: doc._meta.citation };
+}
+
+// Phase 9 (RAG-benefits-decision restructure, spec addendum Section 9):
+// strips a trailing "(a)"-style subsection off a citation so two citations
+// naming the same base section but a different subsection/formatting aren't
+// treated as a disagreement. Shared between flattenForSheets' lexical/
+// semantic agreement check and the retrieval-grounding check below, rather
+// than defined twice.
+function stripSubclause(citation) {
+  return (citation || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
+}
+
+// Same section-extraction pattern fetchExactClause() already uses to resolve
+// a citation to one of this build's cached regulation files -- the regex is
+// inlined (not a shared module-level const) so this function stays a single
+// self-contained unit safe to embed into a Code node via .toString(), the
+// same reason fetchExactClause()'s own regex is inlined rather than named.
+function citationSection(citation) {
+  const m = (citation || "").match(/(1692[a-z]|1681c-2|1026\.13)/);
+  return m ? m[1] : null;
+}
+
+// Phase 9: deterministic backstop for Agent 2's own `outside_cached_corpus`
+// self-report -- a structural check, not a legal-relevance judgment (only
+// Agent 2 can decide whether a retrieved candidate actually applies to the
+// facts; this only checks whether Agent 2's chosen citation's base section
+// showed up in what either retrieval tool actually surfaced). Checked
+// against every candidate BOTH tools returned, not just the top pick, since
+// a citation matching the 2nd or 3rd candidate still means real supporting
+// evidence was found. Returns null when there's no citation to check at all,
+// so callers can tell "nothing to ground" apart from "not grounded."
+function isCitationGroundedInRetrieval(citation, lexicalCandidates, semanticCandidates) {
+  const section = citationSection(citation);
+  if (!section) return citation ? false : null;
+  const candidates = [...(lexicalCandidates || []), ...(semanticCandidates || [])];
+  return candidates.some((c) => citationSection(c.citation) === section);
 }
 
 // Explicit high-risk issue/sub-issue list (spec v6/v7, Section 7): drawn from
@@ -629,9 +676,32 @@ function computeEscalationSignals(ticket, agent1Output, agent2Output, agent4Outp
   const statedMonetaryExposure = extractNarrativeMonetaryExposure(ticket.complaint_what_happened);
   const exceedsMonetaryThreshold = statedMonetaryExposure !== null && statedMonetaryExposure > 500;
 
-  const escalate = requiresHuman || lowConfidence || isHighRiskIssue || isRepeatComplainant || isHighValueAccount || exceedsMonetaryThreshold;
+  // Phase 9 (RAG-benefits-decision restructure): retrieval used to be a
+  // parallel audit trail computed alongside Agent 2 and only ever logged --
+  // nothing downstream acted on it. These two OR-conditions are what make it
+  // actually change the decision. Both default to false/undefined for the
+  // Test path's mocked fixtures and any ticket where Agent 2 didn't cite
+  // anything, so this can only ever ADD an escalation, never remove one --
+  // existing fixture expectations don't need to change.
+  //   - isOutsideCachedCorpus: Agent 2's own admission that it believes a
+  //     real regulation applies but neither retrieval tool actually surfaced
+  //     it -- a genuine "I know something you can't verify" flag, not
+  //     something a keyword/embedding match could ever compute on its own.
+  //   - isCitationUngrounded: the deterministic backstop for that admission
+  //     -- catches the case where Agent 2 forgot to flag it, by directly
+  //     checking whether Agent 2's own citation actually appears among what
+  //     either retrieval tool returned.
+  const isOutsideCachedCorpus = agent2Output.outside_cached_corpus === true;
+  const isCitationUngrounded = agent2Output.citation_not_in_retrieval === true;
 
-  return { requiresHuman, lowConfidence, isHighRiskIssue, isRepeatComplainant, isHighValueAccount, exceedsMonetaryThreshold, statedMonetaryExposure, escalate };
+  const escalate =
+    requiresHuman || lowConfidence || isHighRiskIssue || isRepeatComplainant || isHighValueAccount ||
+    exceedsMonetaryThreshold || isOutsideCachedCorpus || isCitationUngrounded;
+
+  return {
+    requiresHuman, lowConfidence, isHighRiskIssue, isRepeatComplainant, isHighValueAccount,
+    exceedsMonetaryThreshold, statedMonetaryExposure, isOutsideCachedCorpus, isCitationUngrounded, escalate,
+  };
 }
 
 // Ground-truth comparison (spec Section 8 / 15 Phase 5). Section 8 names
@@ -708,7 +778,6 @@ function flattenForSheets(record) {
   // populates semantic_tool_result (Phase 8 addendum Section 6: the
   // semantic tool is Product-path-only); Test-path/mock records simply have
   // none, so every field below degrades to "" / null rather than throwing.
-  const stripSubclause = (citation) => (citation || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
   const lexicalCandidates = record.agents.agent2.regulation_tool_result || [];
   const semanticCandidates = record.agents.agent2.semantic_tool_result || [];
   const lexicalTop = lexicalCandidates[0] || null;
@@ -730,6 +799,8 @@ function flattenForSheets(record) {
     agent2_citation: a2.citation || "",
     agent2_special_population_flag: a2.special_population_flag ?? "",
     agent2_broader_crm_lookup_used: record.agents.agent2.broader_crm_lookup_used,
+    agent2_outside_cached_corpus: a2.outside_cached_corpus ?? "",
+    agent2_citation_not_in_retrieval: a2.citation_not_in_retrieval ?? "",
     lexical_top_citation: lexicalTop ? lexicalTop.citation : "",
     lexical_top_topic: lexicalTop ? lexicalTop.topic : "",
     semantic_top_citation: semanticTop ? semanticTop.citation : "",
@@ -751,6 +822,8 @@ function flattenForSheets(record) {
     escalate_high_value_account: sig.isHighValueAccount ?? "",
     escalate_monetary_threshold: sig.exceedsMonetaryThreshold ?? "",
     escalate_stated_monetary_exposure: sig.statedMonetaryExposure ?? "",
+    escalate_outside_cached_corpus: sig.isOutsideCachedCorpus ?? "",
+    escalate_citation_ungrounded: sig.isCitationUngrounded ?? "",
     cfpb_company_response: gt.cfpb_company_response || "",
     cfpb_timely: gt.cfpb_timely || "",
     cfpb_disputed_flag: gt.cfpb_disputed_flag || "",
@@ -1031,6 +1104,84 @@ function selfTest() {
   if (autoRow.decision !== "AUTO_RESOLVE") failures.push("Auto-resolve row: decision field wrong");
   if (autoRow.agent3_draft !== "") failures.push(`Auto-resolve row: agent3_draft should be empty string when Agent 3's tool wasn't used and output is null, got "${autoRow.agent3_draft}"`);
 
+  // Phase 9 (RAG-benefits-decision restructure): regression test for the
+  // real lexical false positive a live Product-path run surfaced (Sep
+  // 2026) -- Agent 1 classified two genuinely unrelated tickets (a fee
+  // dispute, a wrong-charge dispute) with the word "unauthorized" in its
+  // own free-text issue label, and the lexical tool's synonym table sent
+  // both straight to the FCRA identity-theft-block citation even though
+  // neither complaint involved identity theft. "unauthorized" was removed
+  // from REGULATION_SEARCH_SYNONYMS and the identity-theft phrase trigger
+  // list -- this asserts it stays removed.
+  const unauthorizedFeeMatches = regulationIndexLookup(
+    REGULATION_META_INDEX, REGULATION_SEARCH_STOPWORDS, REGULATION_SEARCH_SYNONYMS, REGULATION_SEARCH_PHRASE_SYNONYMS,
+    "Fees or interest Unauthorized or incorrect fees charged"
+  );
+  if (unauthorizedFeeMatches.some((m) => m.id === "fcra_1681c-2")) {
+    failures.push("Lexical regression: 'unauthorized' alone must not match the identity-theft-block citation (real false positive, Phase 9) -- 'incorrect' should still match billing-error instead");
+  }
+  if (!unauthorizedFeeMatches.some((m) => m.id === "reg_z_1026_13")) {
+    failures.push("Lexical regression: 'incorrect fees' should still match billing-error resolution via the existing incorrect->billing-error synonym -- the unauthorized fix shouldn't have broken this");
+  }
+  // Genuine identity-theft language must still match -- the fix narrows a
+  // false trigger, it doesn't disable the signal.
+  const genuineIdentityTheftMatches = regulationIndexLookup(
+    REGULATION_META_INDEX, REGULATION_SEARCH_STOPWORDS, REGULATION_SEARCH_SYNONYMS, REGULATION_SEARCH_PHRASE_SYNONYMS,
+    "Attempts to collect debt not owed Debt was result of identity theft"
+  );
+  if (!genuineIdentityTheftMatches.some((m) => m.id === "fcra_1681c-2")) {
+    failures.push("Lexical regression: genuine 'identity theft' language must still match the identity-theft-block citation after the unauthorized fix");
+  }
+
+  // isCitationGroundedInRetrieval (Phase 9): the deterministic backstop for
+  // Agent 2's own outside_cached_corpus self-report.
+  const lexCands = [{ citation: "15 U.S.C. §1681c-2" }];
+  const semCands = [{ citation: "12 CFR §1026.13(a)" }];
+  if (isCitationGroundedInRetrieval("12 CFR §1026.13(e)", lexCands, semCands) !== true) {
+    failures.push("Grounding check: a citation matching a semantic candidate's base section (different subsection) should be grounded=true");
+  }
+  if (isCitationGroundedInRetrieval("15 U.S.C. §1692e", lexCands, semCands) !== false) {
+    failures.push("Grounding check: a citation matching neither retrieved list should be grounded=false");
+  }
+  if (isCitationGroundedInRetrieval("15 U.S.C. §1643", lexCands, semCands) !== false) {
+    failures.push("Grounding check: a real citation this build's corpus doesn't even recognize the section of should be grounded=false, not throw or return true");
+  }
+  if (isCitationGroundedInRetrieval(null, lexCands, semCands) !== null) {
+    failures.push("Grounding check: a null citation has nothing to ground -- expected null (not applicable), not false (not grounded)");
+  }
+
+  // Escalation gate (Phase 9): outside_cached_corpus and citation_not_in_
+  // retrieval must each independently force escalation on an otherwise
+  // completely clean ticket -- these are the two new OR-conditions that
+  // make retrieval actually change the decision instead of only logging it.
+  const cleanIshTicket = { crm: { tenure_years: 1, account_tier: "Standard", product_holdings: [], outstanding_balance_usd: 0, prior_complaints_12mo: 0 }, complaint_what_happened: "" };
+  const cleanAgent1 = { issue: "Fees or interest" };
+  const cleanAgent4 = { confidence: 0.95, requires_human: false };
+  const outsideCorpusSignals = computeEscalationSignals(
+    cleanIshTicket, cleanAgent1,
+    { applicable_regulation: "Some real regulation", citation: "15 U.S.C. §1643", outside_cached_corpus: true, citation_not_in_retrieval: false },
+    cleanAgent4, HIGH_RISK_ISSUES, HIGH_RISK_CITATION_MARKERS
+  );
+  if (outsideCorpusSignals.escalate !== true || outsideCorpusSignals.isOutsideCachedCorpus !== true) {
+    failures.push(`Escalation gate: outside_cached_corpus=true must force escalate=true on an otherwise clean ticket, got ${JSON.stringify(outsideCorpusSignals)}`);
+  }
+  const ungroundedSignals = computeEscalationSignals(
+    cleanIshTicket, cleanAgent1,
+    { applicable_regulation: "Something", citation: "12 CFR §1026.13", outside_cached_corpus: false, citation_not_in_retrieval: true },
+    cleanAgent4, HIGH_RISK_ISSUES, HIGH_RISK_CITATION_MARKERS
+  );
+  if (ungroundedSignals.escalate !== true || ungroundedSignals.isCitationUngrounded !== true) {
+    failures.push(`Escalation gate: citation_not_in_retrieval=true must force escalate=true on an otherwise clean ticket, got ${JSON.stringify(ungroundedSignals)}`);
+  }
+  const neitherFlagSignals = computeEscalationSignals(
+    cleanIshTicket, cleanAgent1,
+    { applicable_regulation: "Something", citation: "12 CFR §1026.13", outside_cached_corpus: false, citation_not_in_retrieval: false },
+    cleanAgent4, HIGH_RISK_ISSUES, HIGH_RISK_CITATION_MARKERS
+  );
+  if (neitherFlagSignals.escalate !== false) {
+    failures.push(`Escalation gate: a clean ticket with neither new flag set should not escalate on their account, got ${JSON.stringify(neitherFlagSignals)}`);
+  }
+
   if (failures.length > 0) {
     console.error("SELF-TEST FAILED:\n" + failures.map((f) => `  - ${f}`).join("\n"));
     process.exit(1);
@@ -1215,7 +1366,14 @@ function voyageEmbedNode({ id, name, position, notes }) {
       sendBody: true,
       specifyBody: "json",
       jsonBody: bodyExpr,
-      options: {},
+      options: {
+        batching: {
+          batch: {
+            batchSize: 1,
+            batchInterval: 21000,
+          },
+        },
+      },
     },
     id, name, type: "n8n-nodes-base.httpRequest", typeVersion: 4.2, position,
     credentials: {
@@ -1654,9 +1812,13 @@ Respond with ONLY this JSON shape, no other text:
 }
 "issues" must have at least one entry. "primary_issue" must exactly match one entry's "issue" value -- the one you judge most substantive.`;
 
-const jsAgent2SystemPrompt = `You are Agent 2 (Research) in a complaint-triage pipeline. You receive a CFPB complaint ticket plus Agent 1's classification of it.
+const jsAgent2SystemPrompt = `You are Agent 2 (Research) in a complaint-triage pipeline. You receive a CFPB complaint ticket, Agent 1's classification of it, and the candidate regulations two independent retrieval tools already found in this system's cached regulation corpus, as agent2_regulation_tool_result (keyword search) and agent2_semantic_tool_result (embedding/similarity search). Each candidate has its own citation, topic, and (for the semantic list) a similarity score.
 
-Task: determine which federal regulation, if any, applies to this complaint and why, based on the narrative and the classified issue. Do not guess a citation you're not reasonably confident about -- it is genuinely fine to return null if nothing clearly applies; a downstream deterministic tool independently re-checks your claim against a real cached regulation corpus.
+Task: decide whether a federal regulation applies to this complaint, grounding your answer in the retrieved candidates rather than free-reasoning a citation on your own:
+- If one of the retrieved candidates genuinely applies to the facts and classified issue, cite it -- copy its citation value (choosing its most specific matching subsection if the candidate list distinguishes one) -- and set outside_cached_corpus=false.
+- A candidate being retrieved does NOT mean it applies -- retrieval surfaces textually/semantically similar provisions, it doesn't judge legal relevance. If a candidate doesn't actually fit the facts (e.g. a debt-validation provision was retrieved but the consumer never disputed or requested validation of anything), do not cite it; say why in precedent_notes.
+- If you're confident a real regulation applies but NONE of the retrieved candidates actually cover it, still name the real regulation you know applies in applicable_regulation/citation (don't withhold your own knowledge) but set outside_cached_corpus=true -- this tells the pipeline your citation could not be checked against the cached corpus and should get a human's eyes before it ships.
+- If nothing applies, applicable_regulation/citation may be null (and outside_cached_corpus should be false -- there's nothing to flag as outside the corpus if you're not citing anything).
 
 Decide whether a broader CRM context pull (tenure, account tier, product holdings, balance, prior-complaint history) is warranted: set broader_crm_lookup_used=true when the customer relationship history seems relevant to responding appropriately (e.g. a repeat complainant, a high-value account, or the issue's nature calls for account context) -- this is discretionary, not automatic.
 
@@ -1665,14 +1827,18 @@ Respond with ONLY this JSON shape, no other text:
   "broader_crm_lookup_used": boolean,
   "applicable_regulation": string or null,
   "citation": string or null,
+  "outside_cached_corpus": boolean,
   "precedent_notes": string
 }`;
 
-const jsAgent3SystemPrompt = `You are Agent 3 (Drafting) in a complaint-triage pipeline. You receive a CFPB complaint ticket, Agent 1's classification, and Agent 2's research (applicable regulation and citation, if any).
+const jsAgent3SystemPrompt = `You are Agent 3 (Drafting) in a complaint-triage pipeline. You receive a CFPB complaint ticket, Agent 1's classification, and Agent 2's research: applicable_regulation, citation, outside_cached_corpus, and precedent_notes. When Agent 2 grounded a citation in this system's own regulation corpus (outside_cached_corpus=false and citation is not null), you also receive agent2_grounded_clause -- the actual cached regulation text for that citation, fetched independently before you ran.
 
 Task: draft a response to the consumer addressing their complaint substantively.
 
-Decide whether your draft cites a specific regulatory provision: set cites_regulation=true and cited_clause to the exact citation string ONLY when Agent 2 identified a specific citation AND it's appropriate to cite it in this response. When you do cite it, set tool_used=true so a downstream tool can fetch and verify the exact clause text you're relying on.
+Ground your citation decision in Agent 2's research, not your own independent legal knowledge:
+- Set cites_regulation=true and cited_clause to Agent 2's own citation value VERBATIM -- copy it exactly, do not substitute a different subsection or a different regulation than what Agent 2 grounded -- ONLY when outside_cached_corpus=false, Agent 2 gave a specific citation, and it's appropriate to cite it in this consumer-facing response. When you do cite it, set tool_used=true so a downstream tool can independently re-fetch and verify the exact clause text.
+- If outside_cached_corpus=true, do NOT cite any specific regulation yourself, even if you recognize the area of law from your own training -- Agent 2's citation couldn't be verified against this system's cached corpus, and supplying your own citation here would defeat the point of that check. Acknowledge the complaint substantively without naming a specific provision, and set cites_regulation=false.
+- If Agent 2's citation is null, set cites_regulation=false -- do not supply a citation from your own knowledge.
 
 Respond with ONLY this JSON shape, no other text:
 {
@@ -1685,6 +1851,8 @@ Respond with ONLY this JSON shape, no other text:
 const jsAgent4SystemPrompt = `You are Agent 4 (QA / escalation-scoring) in a complaint-triage pipeline, the final check before a draft either goes out or gets escalated to a human.
 
 Task: review Agent 3's draft against Agent 2's cited regulation and the CRM record. Assess your confidence in the draft's factual accuracy (0-1), whether it requires human review before sending, and a concise reason for that judgment.
+
+Note that a deterministic check downstream of you already forces human review whenever Agent 2 flagged outside_cached_corpus, or its citation doesn't actually match what either retrieval tool surfaced (agent2_output.citation_not_in_retrieval) -- you don't need to re-derive that yourself. But if you notice either one on this ticket, say so plainly in your own reason text (e.g. "citation could not be verified against the cached corpus") rather than reasoning about the draft's accuracy as if the citation were independently confirmed.
 
 Decide whether to re-verify a specific claim: set tool_used=true, and fill reverify_clause and/or reverify_crm_field, ONLY when the draft makes a checkable claim worth independently re-confirming (a cited regulation clause, and/or a specific CRM fact like tenure_years or prior_complaints_12mo). reverify_crm_field must be an exact CRM field name if set.
 
@@ -1727,18 +1895,63 @@ return { json: { ...originalTicket, agent1_tool_used: parsed.tool_used, agent1_o
 const jsParseAgent2Response = `
 ${parseAnthropicJson.toString()}
 
+${citationSection.toString()}
+
+${isCitationGroundedInRetrieval.toString()}
+
 // See Parse: Real Agent 1 Response for why originalTicket is pulled from
-// the upstream node by name instead of $input.item.json.
+// the upstream node by name instead of $input.item.json. Phase 9 moved
+// retrieval (lexical, then semantic) to run BEFORE this agent instead of
+// after -- "Tool: Real Semantic Regulation Retrieval" is now the last node
+// before Real Agent 2 itself, so that's where the pre-API-call ticket lives.
 const apiResponse = $input.item.json;
-const originalTicket = $('Merge: Pre-Real Agent 2').item.json;
+const originalTicket = $('Tool: Real Semantic Regulation Retrieval').item.json;
 const parsed = parseAnthropicJson(apiResponse);
+// Deterministic backstop for Agent 2's own outside_cached_corpus self-report
+// -- see isCitationGroundedInRetrieval()'s own comment for why this checks
+// structural presence in the retrieved candidates, not legal relevance.
+const grounded = isCitationGroundedInRetrieval(parsed.citation, originalTicket.agent2_regulation_tool_result, originalTicket.agent2_semantic_tool_result);
 return {
   json: {
     ...originalTicket,
     agent2_broader_crm_lookup_used: parsed.broader_crm_lookup_used,
-    agent2_output: { applicable_regulation: parsed.applicable_regulation, citation: parsed.citation, precedent_notes: parsed.precedent_notes },
+    agent2_output: {
+      applicable_regulation: parsed.applicable_regulation,
+      citation: parsed.citation,
+      outside_cached_corpus: Boolean(parsed.outside_cached_corpus),
+      citation_not_in_retrieval: grounded === false,
+      precedent_notes: parsed.precedent_notes,
+    },
   },
 };
+`.trim();
+
+const jsGroundingClauseFetchTool = `
+// Tool 2, tier 4 (Phase 9): fetches the exact cached regulation text for
+// Agent 2's own grounded citation BEFORE Agent 3 drafts, not after -- so
+// Agent 3 can ground its draft in real retrieved text instead of recalling
+// a subsection from its own training data. Reuses fetchExactClause(), the
+// same function Agent 3's post-hoc verification tool and Agent 4's
+// re-verify tool already call -- "does this citation resolve to real cached
+// text" is one already-tested question, asked from a third point in the
+// pipeline now, not a second implementation of it.
+//
+// Only runs when Agent 2 actually grounded a citation: a null citation has
+// nothing to fetch, and an outside_cached_corpus citation is by definition
+// not in this build's cached regulation files, so fetchExactClause() would
+// correctly (but uselessly) return found:false for it -- skipped here
+// instead of letting a guaranteed-failing lookup clutter the ticket.
+const REGULATIONS = ${JSON.stringify(REGULATIONS)};
+const CITATION_TO_FILE = ${JSON.stringify(CITATION_TO_FILE)};
+
+${fetchExactClause.toString()}
+
+const ticket = $input.item.json;
+const a2 = ticket.agent2_output || {};
+const agent2_grounded_clause = (a2.citation && !a2.outside_cached_corpus)
+  ? fetchExactClause(REGULATIONS, CITATION_TO_FILE, a2.citation)
+  : null;
+return { json: { ...ticket, agent2_grounded_clause } };
 `.trim();
 
 const jsParseAgent3Response = `
@@ -1784,6 +1997,8 @@ const jsPrepareRowForSheets = `
 // the Sheets node's Append-or-Update operation matches on it, so a
 // re-processed ticket (the date-level watermark overlap noted since
 // Phase 1) updates its existing row instead of duplicating it.
+${stripSubclause.toString()}
+
 ${flattenForSheets.toString()}
 
 const record = $input.item.json;
@@ -1808,33 +2023,46 @@ const nodes = [
   codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000004", name: "Tool: Real CFPB Taxonomy Lookup", mode: "runOnceForEachItem", jsCode: jsTaxonomyTool, position: [1620, 520], notes: "Same real, deterministic taxonomy lookup as the Test path's tool -- reused verbatim, not duplicated logic (see jsTaxonomyTool)." }),
   mergeNode({ id: "c3a8e4b2-0001-4000-8000-000000000005", name: "Merge: Pre-Real Agent 2", position: [1740, 400] }),
 
-  anthropicAgentNode({ id: "c3a8e4b2-0001-4000-8000-000000000006", name: "Real Agent 2: Research", position: [1860, 400], systemPrompt: jsAgent2SystemPrompt, notes: "Real Claude API call. Determines the applicable regulation (if any) and whether broader CRM context is warranted." }),
-  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000007", name: "Parse: Real Agent 2 Response", mode: "runOnceForEachItem", jsCode: jsParseAgent2Response, position: [1980, 400] }),
-  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000008", name: "Tool: Real Special Population Check", mode: "runOnceForEachItem", jsCode: jsSpecialPopulationTool, position: [2100, 400], notes: "Always runs, every ticket -- same deterministic CRM read as the Test path's tool." }),
-  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000009", name: "Tool: Real Regulation Index Lookup", mode: "runOnceForEachItem", jsCode: jsRegulationIndexTool, position: [2280, 400], notes: "Always runs -- independently cross-checks Real Agent 2's own regulation claim against the real cached corpus." }),
-  voyageEmbedNode({ id: "c3a8e4b2-0001-4000-8000-00000000000e", name: "HTTP Request: Real Semantic Query Embed", position: [2360, 520], notes: "Phase 8. Real Voyage API call -- embeds agent2_semantic_query_text (voyage-3-large, input_type: query) for the semantic retrieval tool below." }),
-  codeNode({ id: "c3a8e4b2-0001-4000-8000-00000000000f", name: "Tool: Real Semantic Regulation Retrieval", mode: "runOnceForEachItem", jsCode: jsSemanticRegulationTool, position: [2440, 520], notes: "Phase 8 (addendum). Always runs alongside the lexical tool, Product path only -- cosine-similarity top-k against the pre-embedded regulation corpus, effective-dated to the ticket's own filing date." }),
-  ifNode({ id: "c3a8e4b2-0001-4000-8000-00000000000a", name: "IF: Real Agent 2 Broader CRM Lookup Used?", leftValueExpr: "={{ $json.agent2_broader_crm_lookup_used }}", position: [2460, 400] }),
-  codeNode({ id: "c3a8e4b2-0001-4000-8000-00000000000b", name: "Tool: Real CRM Broader Context Lookup", mode: "runOnceForEachItem", jsCode: jsCrmBroaderTool, position: [2720, 520] }),
-  mergeNode({ id: "c3a8e4b2-0001-4000-8000-00000000000c", name: "Merge: Pre-Real Agent 3", position: [2840, 400] }),
+  // Phase 9 (RAG-benefits-decision restructure, spec addendum Section 9):
+  // retrieval (lexical, then semantic) now runs BEFORE Real Agent 2, not
+  // after -- previously both tools computed candidates that only ever got
+  // logged alongside Agent 2's own free-reasoned citation, never actually
+  // read by it. Moving them here means Agent 2's prompt (which dumps the
+  // whole ticket, see anthropicAgentNode()) genuinely contains the
+  // retrieved candidates by the time it runs -- this is what makes it RAG
+  // instead of a parallel audit trail. Real Special Population Check is
+  // moved up alongside them for the same reason it was always "always
+  // runs, every ticket" -- it doesn't depend on Agent 2 at all, so there's
+  // no reason to wait.
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000008", name: "Tool: Real Special Population Check", mode: "runOnceForEachItem", jsCode: jsSpecialPopulationTool, position: [1860, 400], notes: "Always runs, every ticket -- same deterministic CRM read as the Test path's tool." }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000009", name: "Tool: Real Regulation Index Lookup", mode: "runOnceForEachItem", jsCode: jsRegulationIndexTool, position: [1980, 400], notes: "Phase 9: moved before Real Agent 2 (was after) -- feeds it retrieved candidates instead of only cross-checking its citation after the fact." }),
+  voyageEmbedNode({ id: "c3a8e4b2-0001-4000-8000-00000000000e", name: "HTTP Request: Real Semantic Query Embed", position: [2100, 520], notes: "Phase 8. Real Voyage API call -- embeds agent2_semantic_query_text (voyage-3-large, input_type: query) for the semantic retrieval tool below." }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-00000000000f", name: "Tool: Real Semantic Regulation Retrieval", mode: "runOnceForEachItem", jsCode: jsSemanticRegulationTool, position: [2220, 520], notes: "Phase 8 (addendum). Phase 9: moved before Real Agent 2 -- cosine-similarity top-k against the pre-embedded regulation corpus, effective-dated to the ticket's own filing date, now feeds Agent 2's own prompt instead of only cross-checking it afterward." }),
 
-  anthropicAgentNode({ id: "c3a8e4b2-0001-4000-8000-00000000000d", name: "Real Agent 3: Drafting", position: [2960, 400], systemPrompt: jsAgent3SystemPrompt, notes: "Real Claude API call. Drafts the response and decides whether it cites a specific regulatory provision." }),
-  codeNode({ id: "c3a8e4b2-0001-4000-8000-00000000000e", name: "Parse: Real Agent 3 Response", mode: "runOnceForEachItem", jsCode: jsParseAgent3Response, position: [3080, 400] }),
-  ifNode({ id: "c3a8e4b2-0001-4000-8000-00000000000f", name: "IF: Real Agent 3 Tool Used?", leftValueExpr: "={{ $json.agent3_tool_used }}", position: [3200, 400] }),
-  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000010", name: "Tool: Real Exact Regulation Clause Fetch", mode: "runOnceForEachItem", jsCode: jsClauseFetchTool, position: [3380, 520] }),
-  mergeNode({ id: "c3a8e4b2-0001-4000-8000-000000000011", name: "Merge: Pre-Real Agent 4", position: [3500, 400] }),
+  anthropicAgentNode({ id: "c3a8e4b2-0001-4000-8000-000000000006", name: "Real Agent 2: Research", position: [2340, 400], systemPrompt: jsAgent2SystemPrompt, notes: "Real Claude API call. Determines the applicable regulation (if any), grounded in the lexical/semantic candidates retrieved above, and whether broader CRM context is warranted." }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000007", name: "Parse: Real Agent 2 Response", mode: "runOnceForEachItem", jsCode: jsParseAgent2Response, position: [2460, 400], notes: "Phase 9: also deterministically checks whether Agent 2's citation actually matches a retrieved candidate -- a backstop for its own outside_cached_corpus self-report, not reliant on it." }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000020", name: "Tool: Real Grounding Clause Fetch", mode: "runOnceForEachItem", jsCode: jsGroundingClauseFetchTool, position: [2580, 400], notes: "Phase 9. When Agent 2 grounded a citation in the cached corpus, fetches its exact text now so Real Agent 3 drafts from real retrieved text instead of its own recollection." }),
+  ifNode({ id: "c3a8e4b2-0001-4000-8000-00000000000a", name: "IF: Real Agent 2 Broader CRM Lookup Used?", leftValueExpr: "={{ $json.agent2_broader_crm_lookup_used }}", position: [2700, 400] }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-00000000000b", name: "Tool: Real CRM Broader Context Lookup", mode: "runOnceForEachItem", jsCode: jsCrmBroaderTool, position: [2820, 520] }),
+  mergeNode({ id: "c3a8e4b2-0001-4000-8000-00000000000c", name: "Merge: Pre-Real Agent 3", position: [2940, 400] }),
 
-  anthropicAgentNode({ id: "c3a8e4b2-0001-4000-8000-000000000012", name: "Real Agent 4: QA / Escalation-Scoring", position: [3620, 400], systemPrompt: jsAgent4SystemPrompt, notes: "Real Claude API call, the final check before a draft ships or escalates. Assesses confidence and whether human review is required." }),
-  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000013", name: "Parse: Real Agent 4 Response", mode: "runOnceForEachItem", jsCode: jsParseAgent4Response, position: [3740, 400] }),
-  ifNode({ id: "c3a8e4b2-0001-4000-8000-000000000014", name: "IF: Real Agent 4 Tool Used?", leftValueExpr: "={{ $json.agent4_tool_used }}", position: [3860, 400] }),
-  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000015", name: "Tool: Real Re-verify Clause & CRM Fact", mode: "runOnceForEachItem", jsCode: jsReverifyTool, position: [4040, 520] }),
-  mergeNode({ id: "c3a8e4b2-0001-4000-8000-000000000016", name: "Merge: Pre-Real Escalation Signals", position: [4160, 400] }),
+  anthropicAgentNode({ id: "c3a8e4b2-0001-4000-8000-00000000000d", name: "Real Agent 3: Drafting", position: [3060, 400], systemPrompt: jsAgent3SystemPrompt, notes: "Real Claude API call. Drafts the response, citing ONLY Agent 2's own grounded citation (verbatim) -- Phase 9 removed its discretion to independently pick a different citation than what Agent 2 grounded." }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-00000000000e", name: "Parse: Real Agent 3 Response", mode: "runOnceForEachItem", jsCode: jsParseAgent3Response, position: [3180, 400] }),
+  ifNode({ id: "c3a8e4b2-0001-4000-8000-00000000000f", name: "IF: Real Agent 3 Tool Used?", leftValueExpr: "={{ $json.agent3_tool_used }}", position: [3300, 400] }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000010", name: "Tool: Real Exact Regulation Clause Fetch", mode: "runOnceForEachItem", jsCode: jsClauseFetchTool, position: [3480, 520] }),
+  mergeNode({ id: "c3a8e4b2-0001-4000-8000-000000000011", name: "Merge: Pre-Real Agent 4", position: [3600, 400] }),
+
+  anthropicAgentNode({ id: "c3a8e4b2-0001-4000-8000-000000000012", name: "Real Agent 4: QA / Escalation-Scoring", position: [3720, 400], systemPrompt: jsAgent4SystemPrompt, notes: "Real Claude API call, the final check before a draft ships or escalates. Assesses confidence and whether human review is required." }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000013", name: "Parse: Real Agent 4 Response", mode: "runOnceForEachItem", jsCode: jsParseAgent4Response, position: [3840, 400] }),
+  ifNode({ id: "c3a8e4b2-0001-4000-8000-000000000014", name: "IF: Real Agent 4 Tool Used?", leftValueExpr: "={{ $json.agent4_tool_used }}", position: [3960, 400] }),
+  codeNode({ id: "c3a8e4b2-0001-4000-8000-000000000015", name: "Tool: Real Re-verify Clause & CRM Fact", mode: "runOnceForEachItem", jsCode: jsReverifyTool, position: [4140, 520] }),
+  mergeNode({ id: "c3a8e4b2-0001-4000-8000-000000000016", name: "Merge: Pre-Real Escalation Signals", position: [4260, 400] }),
 
   // Both rows converge here -- the escalation math, ground-truth comparison,
   // and Sheets write are pure, agent-source-agnostic logic (spec Section
   // 7/8/11), so there's no reason to duplicate them: one shared tail fed by
   // both the Test path's and Product path's finished records.
-  mergeNode({ id: "c3a8e4b2-0001-4000-8000-000000000017", name: "Merge: Test/Product Final", position: [4200, 130] }),
+  mergeNode({ id: "c3a8e4b2-0001-4000-8000-000000000017", name: "Merge: Test/Product Final", position: [4460, 130] }),
 
   // --- Canvas labels (pure annotation, no data flow) -- built for the
   // marketing recording: row labels distinguishing Test path (top) from
@@ -1919,14 +2147,17 @@ const connections = [
   { from: "IF: Real Agent 1 Tool Used?", to: "Tool: Real CFPB Taxonomy Lookup", fromOutput: 0 },
   { from: "Tool: Real CFPB Taxonomy Lookup", to: "Merge: Pre-Real Agent 2", fromOutput: 0, toInput: 0 },
   { from: "IF: Real Agent 1 Tool Used?", to: "Merge: Pre-Real Agent 2", fromOutput: 1, toInput: 1 },
-  connect("Merge: Pre-Real Agent 2", "Real Agent 2: Research"),
-
-  { from: "Real Agent 2: Research", to: "Parse: Real Agent 2 Response", fromOutput: 0 },
-  { from: "Parse: Real Agent 2 Response", to: "Tool: Real Special Population Check", fromOutput: 0 },
+  // Phase 9: retrieval (lexical, then semantic) now runs in this gap, before
+  // Real Agent 2 -- see the comment above these nodes' definitions for why.
+  connect("Merge: Pre-Real Agent 2", "Tool: Real Special Population Check"),
   { from: "Tool: Real Special Population Check", to: "Tool: Real Regulation Index Lookup", fromOutput: 0 },
   { from: "Tool: Real Regulation Index Lookup", to: "HTTP Request: Real Semantic Query Embed", fromOutput: 0 },
   { from: "HTTP Request: Real Semantic Query Embed", to: "Tool: Real Semantic Regulation Retrieval", fromOutput: 0 },
-  { from: "Tool: Real Semantic Regulation Retrieval", to: "IF: Real Agent 2 Broader CRM Lookup Used?", fromOutput: 0 },
+  connect("Tool: Real Semantic Regulation Retrieval", "Real Agent 2: Research"),
+
+  { from: "Real Agent 2: Research", to: "Parse: Real Agent 2 Response", fromOutput: 0 },
+  connect("Parse: Real Agent 2 Response", "Tool: Real Grounding Clause Fetch"),
+  { from: "Tool: Real Grounding Clause Fetch", to: "IF: Real Agent 2 Broader CRM Lookup Used?", fromOutput: 0 },
   { from: "IF: Real Agent 2 Broader CRM Lookup Used?", to: "Tool: Real CRM Broader Context Lookup", fromOutput: 0 },
   { from: "Tool: Real CRM Broader Context Lookup", to: "Merge: Pre-Real Agent 3", fromOutput: 0, toInput: 0 },
   { from: "IF: Real Agent 2 Broader CRM Lookup Used?", to: "Merge: Pre-Real Agent 3", fromOutput: 1, toInput: 1 },
