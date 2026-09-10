@@ -119,6 +119,13 @@ function reshapeSheetRow(row) {
         semantic_top_similarity: parseSheetNumber(row.semantic_top_similarity),
         semantic_top_effective_date: row.semantic_top_effective_date || null,
         lexical_semantic_agree: row.lexical_semantic_agree === "" || row.lexical_semantic_agree === undefined ? null : parseSheetBool(row.lexical_semantic_agree),
+        // Phase 9 (RAG-benefits-decision restructure, build phase 9). Only
+        // present on rows written after that change shipped -- undefined/""
+        // on every earlier row, which reshapes to null (not false): a row
+        // predating the restructure genuinely never computed this signal,
+        // which is a different fact than "computed and found grounded".
+        outside_cached_corpus: row.agent2_outside_cached_corpus === "" || row.agent2_outside_cached_corpus === undefined ? null : parseSheetBool(row.agent2_outside_cached_corpus),
+        citation_not_in_retrieval: row.agent2_citation_not_in_retrieval === "" || row.agent2_citation_not_in_retrieval === undefined ? null : parseSheetBool(row.agent2_citation_not_in_retrieval),
       },
       agent3: {
         tool_used: agent3ToolUsed,
@@ -142,6 +149,8 @@ function reshapeSheetRow(row) {
       isHighValueAccount: parseSheetBool(row.escalate_high_value_account),
       exceedsMonetaryThreshold: parseSheetBool(row.escalate_monetary_threshold),
       statedMonetaryExposure: parseSheetNumber(row.escalate_stated_monetary_exposure),
+      isOutsideCachedCorpus: row.escalate_outside_cached_corpus === "" || row.escalate_outside_cached_corpus === undefined ? null : parseSheetBool(row.escalate_outside_cached_corpus),
+      isCitationUngrounded: row.escalate_citation_ungrounded === "" || row.escalate_citation_ungrounded === undefined ? null : parseSheetBool(row.escalate_citation_ungrounded),
     },
     ground_truth: {
       cfpb_company_response: row.cfpb_company_response || null,

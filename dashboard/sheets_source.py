@@ -88,6 +88,14 @@ def _reshape_row(row: dict) -> dict:
                 "semantic_top_similarity": _parse_number(row.get("semantic_top_similarity")),
                 "semantic_top_effective_date": row.get("semantic_top_effective_date") or None,
                 "lexical_semantic_agree": None if row.get("lexical_semantic_agree", "") == "" else _parse_bool(row.get("lexical_semantic_agree")),
+                # Phase 9 restructure -- Python twin of the same fields in
+                # export_dashboard_data.mjs's reshapeSheetRow(). Null (not
+                # false) on any row where these were never computed, same
+                # "not available yet" reasoning as lexical_semantic_agree
+                # above -- a missing check is a different fact from a
+                # passed one.
+                "outside_cached_corpus": None if row.get("agent2_outside_cached_corpus", "") == "" else _parse_bool(row.get("agent2_outside_cached_corpus")),
+                "citation_not_in_retrieval": None if row.get("agent2_citation_not_in_retrieval", "") == "" else _parse_bool(row.get("agent2_citation_not_in_retrieval")),
             },
             "agent3": {
                 "tool_used": agent3_tool_used,
@@ -114,6 +122,8 @@ def _reshape_row(row: dict) -> dict:
             "isHighValueAccount": _parse_bool(row.get("escalate_high_value_account")),
             "exceedsMonetaryThreshold": _parse_bool(row.get("escalate_monetary_threshold")),
             "statedMonetaryExposure": _parse_number(row.get("escalate_stated_monetary_exposure")),
+            "isOutsideCachedCorpus": None if row.get("escalate_outside_cached_corpus", "") == "" else _parse_bool(row.get("escalate_outside_cached_corpus")),
+            "isCitationUngrounded": None if row.get("escalate_citation_ungrounded", "") == "" else _parse_bool(row.get("escalate_citation_ungrounded")),
         },
         "ground_truth": {
             "cfpb_company_response": row.get("cfpb_company_response") or None,

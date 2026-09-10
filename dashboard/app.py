@@ -22,6 +22,7 @@ Run: streamlit run dashboard/app.py
 
 import json
 from pathlib import Path
+from urllib.parse import quote
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -130,7 +131,7 @@ def inject_brand_css():
                down the chain, so each card still shrinks to its own content
                (verified live: 126px-197px across the 5 cards depending on
                sub-label length). A min-height sized to the longest current
-               sub-label (Escalation agreement's 4-line text) is a simpler,
+               sub-label (Missed-risk rate's multi-line text) is a simpler,
                more robust fix than fighting undocumented internal DOM. */
             min-height: 200px;
         }}
@@ -201,6 +202,59 @@ def inject_brand_css():
         .queue-table td.mono {{
             font-family: monospace;
             color: {NAVY};
+        }}
+        /* Per-ticket retrieval indicator in the queue tables (Phase 9
+           revision -- see retrieval_badge_html's docstring for why this no
+           longer reports lexical-vs-semantic agreement). Kept inside the
+           existing navy/slate palette rather than introducing new accent
+           colors -- "flagged" gets a filled pill (same treatment as the
+           disclosure banner) since it's the state worth a reviewer's eye,
+           every other state stays plain text. */
+        .retrieval-pre-rag {{
+            color: {SLATE};
+            font-style: italic;
+        }}
+        .retrieval-lexical {{
+            color: {SLATE};
+        }}
+        .retrieval-grounded {{
+            color: {NAVY};
+            font-weight: 500;
+        }}
+        .retrieval-none-applicable {{
+            color: {SLATE};
+        }}
+        .retrieval-flagged-badge {{
+            display: inline-block;
+            background: {SLATE};
+            color: {WHITE};
+            font-size: 0.72rem;
+            font-weight: 600;
+            padding: 0.15rem 0.5rem;
+            border-radius: 4px;
+        }}
+        .retrieval-detail {{
+            font-size: 0.76rem;
+            color: {SLATE};
+            margin-top: 0.3rem;
+        }}
+        /* Draft preview cell is a real link (a plain browser navigation with
+           a query param, same mechanism as the bar-jump links below -- see
+           main()'s handling of ?view_draft=...) that opens the full draft in
+           a popup. Styled to read as clickable without looking like a
+           generic blue hyperlink. */
+        /* !important: Streamlit's own markdown renderer applies a default
+           link color/underline to every <a> with higher effective priority
+           than a plain class rule here (confirmed live -- without this the
+           link rendered in Streamlit's default blue regardless). */
+        a.draft-preview-link {{
+            color: inherit !important;
+            text-decoration: none !important;
+            cursor: pointer;
+        }}
+        a.draft-preview-link:hover {{
+            color: {NAVY} !important;
+            text-decoration: underline !important;
         }}
         .section-caption {{
             font-size: 0.82rem;
@@ -418,72 +472,240 @@ def kpi_citation_accuracy(records):
     return pct, f"{correct}/{len(cited)} cited drafts, QA-verified against real regulation text"
 
 
-def build_phase8_footnote_html(records):
-    """Citation-accuracy footnote (Phase 8 addendum Section 6, build phase
-    7): distinguishes lexical-matched vs. semantic-matched citations for any
-    ticket where the two disagreed, plus which document version (its
-    effective_date) the semantic match was judged against.
+def build_retrieval_grounding_footnote_html(records):
+    """Retrieval-grounding footnote (Phase 9 revision of the Phase 8
+    dual-signal footnote).
 
-    Only Product-path tickets ever carry both signals -- the semantic tool
-    is Product-path-only (addendum Section 6), so Test-path fixtures never
-    populate these fields. A fixture-only data source (the default,
-    simulator-generated dashboard/data/pipeline_log.json) will always hit
-    the "not yet available" branch below; that's disclosed here rather than
-    silently rendering nothing, matching this dashboard's own "small n,
-    nothing padded" ethic. Pure string-building, no Streamlit calls, so it's
-    testable without running the app.
+    Phase 8 built this footnote when retrieval ran *after* Agent 2 as a
+    pure post-hoc audit trail -- neither tool's result fed back into any
+    agent's prompt, so "did lexical and semantic agree" was the only
+    honest thing to report. Phase 9 moved retrieval *before* Agent 2 and
+    made its output the thing Agent 2 grounds a citation in (or explicitly
+    declines to cite against) -- lexical/semantic agreement stopped being
+    the interesting question the day retrieval started shaping the
+    decision instead of just watching it. Reporting an "agree/disagree"
+    rate here after that change reads as an ongoing comparison between two
+    interchangeable tools, which misrepresents what's actually being
+    checked now: whether Agent 2's citation is grounded in what retrieval
+    (either tool) surfaced, not whether the two tools' top picks match.
+
+    Also scoped to real (non-fixture) tickets only, and says so -- the 12
+    earlier tickets in this pilot were decided under Phase 7 (real Agent
+    1-4, before any retrieval architecture existed) and never ran either
+    search, so folding them into this count would silently compare tickets
+    that never had retrieval to ones that did.
+
+    Deliberately plain-language and free of per-ticket detail: an earlier
+    version named every flagged ticket with an identical repeated sentence
+    (just the ID changed) and used internal vocabulary ("Product-path",
+    "retrieval actually surfaced") that assumes pipeline knowledge this
+    dashboard's actual reader -- a business/compliance reviewer, not a
+    pipeline engineer -- doesn't have and doesn't need. The per-ticket
+    detail already lives one scroll down, as the Retrieval column's
+    "Flagged" badge on each row (see retrieval_badge_html) -- repeating it
+    here in prose was pure duplication. This footnote's only job is the
+    one number a reviewer actually needs: how many of this system's own
+    citations have been confirmed against the reference library so far.
+    Pure string-building, no Streamlit calls, so it's testable without
+    running the app.
     """
-    dual = [r for r in records if r["agents"]["agent2"].get("semantic_top_citation")]
-    if not dual:
+    grounded_pool = [r for r in records if r["agents"]["agent2"].get("semantic_top_citation")]
+    if not grounded_pool:
         return (
-            '<p class="section-caption"><strong>Phase 8 dual-signal retrieval</strong> (lexical vs. '
-            "semantic) isn't reflected in this data source yet — only real Product-path tickets carry "
-            "both signals, and none have been written to the live Sheet yet. See "
-            "eval/kpi_results.json for a direct, offline comparison of the two tools against 18 "
+            '<p class="section-caption"><strong>Regulation-citation verification:</strong> no real tickets in '
+            "this data source yet — this check only runs on live tickets, not the hand-verified test cases. "
+            "See eval/kpi_results.json for a direct, offline comparison of the two retrieval tools against 18 "
             "hand-verified held-out tickets (semantic recall 90% vs. lexical 50%).</p>"
         )
 
-    disagree = [r for r in dual if r["agents"]["agent2"].get("lexical_semantic_agree") is False]
-    agree_count = sum(1 for r in dual if r["agents"]["agent2"].get("lexical_semantic_agree") is True)
-
-    parts = [
-        '<p class="section-caption"><strong>Phase 8 dual-signal retrieval:</strong> lexical and semantic '
-        f"agreed on {agree_count}/{len(dual)} Product-path ticket(s)."
+    flagged = [
+        r for r in grounded_pool
+        if r["agents"]["agent2"].get("outside_cached_corpus") or r["agents"]["agent2"].get("citation_not_in_retrieval")
     ]
-    if not disagree:
-        parts.append(" No disagreements in this data.</p>")
-        return "".join(parts)
+    flagged_ids = {r["complaint_id"] for r in flagged}
+    grounded = [
+        r for r in grounded_pool
+        if r["agents"]["agent2"]["output"].get("citation") and r["complaint_id"] not in flagged_ids
+    ]
+    declined = [r for r in grounded_pool if not r["agents"]["agent2"]["output"].get("citation")]
 
-    parts.append(" Disagreements below are logged as both signals, not silently resolved to one:</p>")
-    parts.append('<ul class="section-caption">')
-    for r in disagree:
-        a2 = r["agents"]["agent2"]
+    # Leads with what the check DOES (a safety property: nothing unverified
+    # ships silently) rather than a bare "X confirmed" count -- a low or
+    # zero confirmed-count reads as "the system doesn't work" if it's the
+    # first number a reader sees, when the actual story at this pilot's
+    # current size is closer to the opposite: every flagged citation named
+    # a real, correctly-identified regulation that simply isn't in this
+    # pilot's still-small reference library yet, and every one of them was
+    # caught and routed for review rather than shipped unverified -- a
+    # coverage gap, not a correctness failure. Omits the "N confirmed"
+    # clause entirely when zero, rather than leading with a number that
+    # would otherwise need a defensive caveat right next to it.
+    parts = [
+        '<p class="section-caption"><strong>Regulation-citation verification:</strong> this check flags any '
+        "citation that doesn't match this pilot's reference library, so it's never sent out unverified."
+    ]
+    if grounded:
+        parts.append(f" {len(grounded)} of {len(grounded_pool)} real citation(s) matched the library and are confirmed.")
+    if flagged:
         parts.append(
-            f"<li><strong>{r['complaint_id']}</strong>: lexical matched "
-            f"{a2.get('lexical_top_citation') or '(no match)'}, semantic matched "
-            f"{a2.get('semantic_top_citation') or '(no match)'} "
-            f"(text in force as of {a2.get('semantic_top_effective_date') or 'unknown'})</li>"
+            f" {len(flagged)} cited a real regulation outside this still-small library's current coverage, and "
+            "were automatically routed for human review instead of shipping unverified — see the Flagged rows below."
         )
-    parts.append("</ul>")
+    if declined:
+        parts.append(f" {len(declined)} ticket(s) had no applicable regulation to cite at all.")
+    parts.append("</p>")
     return "".join(parts)
 
 
-def render_phase8_dual_signal_footnote(records):
-    md_html(build_phase8_footnote_html(records))
+def render_retrieval_grounding_footnote(records):
+    md_html(build_retrieval_grounding_footnote_html(records))
 
 
-def kpi_escalation_agreement(records):
-    # Real, computed -- and expected to read low here. See README/spec
-    # Section 8: CFPB's own outcome category is a coarse administrative
-    # label, not a severity judgment, so low agreement on this fixture set
-    # is a demonstration of the metric's own honest limits, not a pipeline
-    # defect. Never report this as accuracy.
+def retrieval_badge_html(record):
+    """Per-ticket retrieval indicator for the queue tables (Phase 9
+    revision -- see build_retrieval_grounding_footnote_html's docstring for
+    why the headline signal is grounding, not lexical-vs-semantic
+    agreement). Pure string building, no Streamlit calls, same
+    testable-without-running-the-app pattern as the footnote builder.
+    """
+    a2 = record["agents"]["agent2"]
+    semantic_citation = a2.get("semantic_top_citation")
+    lexical_citation = a2.get("lexical_top_citation")
+
+    # Phase 7 tickets (internal build terminology -- never shown to a
+    # dashboard reader) predate the retrieval architecture entirely -- Agent
+    # 2 researched from its own knowledge with no search behind it at all,
+    # so labelling them "Lexical only" would imply a search step that never
+    # ran.
+    if not semantic_citation and not lexical_citation:
+        return (
+            '<span class="retrieval-pre-rag" title="This ticket was decided before the retrieval system '
+            "existed -- Agent 2 researched from its own knowledge, with no keyword or embedding search "
+            'behind it.">No retrieval used</span>'
+        )
+
+    if not semantic_citation:
+        return (
+            '<span class="retrieval-lexical" title="Only the keyword-based regulation search ran for this '
+            'ticket — the AI-embedding-based search is Product-path-only.">Lexical only</span>'
+        )
+
+    candidate_detail = f'<div class="retrieval-detail">Lexical: {lexical_citation or "(no match)"}<br>Semantic: {semantic_citation}</div>'
+    citation = a2["output"].get("citation")
+    outside_corpus = a2.get("outside_cached_corpus")
+    ungrounded = a2.get("citation_not_in_retrieval")
+
+    if citation and (outside_corpus or ungrounded):
+        reason = (
+            "Agent 2 flagged this citation as outside this system's cached regulation corpus"
+            if outside_corpus
+            else "Agent 2's citation doesn't match what either retrieval tool actually surfaced"
+        )
+        return (
+            f'<span class="retrieval-flagged-badge" title="{reason} — routed for human review.">Flagged</span>'
+            f"{candidate_detail}"
+        )
+
+    # Defensive fallback, not currently reachable in this data: every
+    # Product-path ticket today has had citation_not_in_retrieval computed
+    # (retroactively, for the four that predate the Phase 9 restructure --
+    # see the backfill note in the sheet update history). If a future record
+    # somehow arrives with a citation but neither grounding field ever
+    # computed, defaulting it to "Grounded" would be a false claim of
+    # verification that never happened -- so this stays a distinct,
+    # deliberately unverified-looking state instead.
+    if citation and outside_corpus is None and ungrounded is None:
+        return (
+            '<span class="retrieval-lexical" title="This ticket\'s citation was never checked against what '
+            'retrieval surfaced.">Not verified</span>'
+            f"{candidate_detail}"
+        )
+
+    if citation:
+        return (
+            '<span class="retrieval-grounded" title="Agent 2 cited a regulation, and it matches a candidate '
+            'retrieval (keyword and/or embedding search) actually surfaced.">Grounded</span>'
+            f"{candidate_detail}"
+        )
+
+    return (
+        '<span class="retrieval-none-applicable" title="Retrieval surfaced candidate regulations, but Agent 2 '
+        "judged none of them actually applied to this complaint's facts.\">No regulation applies</span>"
+        f"{candidate_detail}"
+    )
+
+
+# Explains the Retrieval column's states in plain text, not just an
+# on-hover tooltip -- a reader skimming the table has no reason to know to
+# hover, so the tooltips on each badge (see retrieval_badge_html) are a
+# bonus for anyone who does, not the only explanation available.
+RETRIEVAL_COLUMN_CAPTION = (
+    '<p class="section-caption">Retrieval: for Product-path tickets, two independent tools search for the '
+    "applicable regulation — a keyword-based lookup and an AI-embedding-based one — and Agent 2 grounds its "
+    "citation in what they found. <strong>Grounded</strong> means the citation matches a retrieved candidate; "
+    "<strong>No regulation applies</strong> means Agent 2 judged none of the candidates fit; "
+    "<strong>Flagged</strong> means Agent 2 cited something retrieval couldn't verify, routed for human review; "
+    "<strong>No retrieval used</strong> means this ticket was decided before the retrieval system existed.</p>"
+)
+
+
+def kpi_missed_risk_rate(records):
+    """Replaces the old blended "escalation agreement" framing. That number
+    averaged two very different things into one percentage: cases where we
+    escalated something CFPB's own outcome record calls routine (extra
+    caution — not a miss), and cases where CFPB's record shows something
+    genuinely happened (an untimely response, or monetary relief paid) but
+    we auto-resolved anyway (a real miss). Blending them produced a bare
+    percentage that read as an accuracy score even with a caveat underneath
+    it, which is a misleading headline number regardless of the caption.
+
+    This KPI reports only the second, compliance-relevant question: of the
+    tickets CFPB's own record flags as elevated, what share did we let
+    through without a human ever reviewing it? The other side (extra
+    caution beyond CFPB's record) is reported separately, in its own
+    footnote below the KPI row -- see build_escalation_caution_footnote_html.
+    """
     with_gt = [r for r in records if r.get("ground_truth")]
-    if not with_gt:
-        return None, "No ground-truth comparisons yet"
-    agree = sum(1 for r in with_gt if r["ground_truth"]["agrees_with_ground_truth"])
-    pct = round(100 * agree / len(with_gt))
-    return pct, f"{agree}/{len(with_gt)} agree with CFPB's outcome fields — directional signal, not accuracy (Section 8)"
+    elevated = [r for r in with_gt if r["ground_truth"]["ground_truth_signal"] == "elevated"]
+    if not elevated:
+        return None, "No CFPB-flagged-elevated tickets in this data yet"
+    missed = sum(1 for r in elevated if r["decision"] == "AUTO_RESOLVE")
+    pct = round(100 * missed / len(elevated))
+    ticket_word = "ticket" if len(elevated) == 1 else "tickets"
+    # States the outcome directly rather than as a bare "0/1" fraction --
+    # confirmed by user feedback that a 0-over-N ratio makes a reader do the
+    # subtraction to realize it's good news, especially at small n.
+    if missed == 0:
+        sub = f"{len(elevated)} of {len(elevated)} CFPB-flagged-elevated {ticket_word} correctly escalated for review"
+    else:
+        sub = f"{missed} of {len(elevated)} CFPB-flagged-elevated {ticket_word} auto-resolved without human review"
+    return pct, sub
+
+
+def build_escalation_caution_footnote_html(records):
+    """The other half of the comparison kpi_missed_risk_rate deliberately
+    excludes: tickets escalated even though CFPB's own outcome record reads
+    as routine. Reported here as its own line, not folded back into a
+    single percentage -- these are the pipeline erring toward caution on a
+    low-confidence draft, a factual conflict, or a repeat-complaint
+    pattern, not a disagreement with what actually happened.
+    """
+    with_gt = [r for r in records if r.get("ground_truth")]
+    routine = [r for r in with_gt if r["ground_truth"]["ground_truth_signal"] == "routine"]
+    if not routine:
+        return ""
+    extra_caution = [r for r in routine if r["decision"] == "ESCALATE_TO_HUMAN"]
+    if not extra_caution:
+        return (
+            '<p class="section-caption">Every CFPB-flagged-routine ticket in this data was also '
+            "auto-resolved — no extra-caution escalations to report yet.</p>"
+        )
+    return (
+        f'<p class="section-caption"><strong>{len(extra_caution)}/{len(routine)}</strong> tickets CFPB\'s own '
+        "outcome record reads as routine were escalated to a human anyway — the pipeline erring toward "
+        "caution (a low-confidence draft, a factual conflict, a repeat-complaint pattern), not a "
+        "disagreement with what actually happened.</p>"
+    )
 
 
 def kpi_category_agreement(records):
@@ -625,17 +847,63 @@ def chart_tool_use_frequency(records):
             marker_color=NAVY,
             text=[f"{counts[k]}/{n}" for k in tool_labels],
             textposition="outside",
+            # Without this, an "outside" text label on a bar that reaches (or
+            # comes close to) the axis's own upper bound gets clipped to the
+            # plotting rectangle -- visible once a tool hits n/n (e.g. Agent
+            # 2's regulation-index lookup, which always runs). The extra
+            # range headroom below is for visual balance, not clipping --
+            # cliponaxis is what actually fixes the cutoff.
+            cliponaxis=False,
         )
     )
-    fig.update_layout(xaxis=dict(range=[0, n + 0.5], dtick=1), margin=dict(l=190))
+    fig.update_layout(xaxis=dict(range=[0, n + 1.5], dtick=1), margin=dict(l=190))
     return plotly_brand_layout(fig, "Tool-use frequency (of tickets processed)")
+
+
+# ---------------------------------------------------------------------------
+# Full-draft popup -- the queue tables below only ever show a truncated
+# preview (keeps the table scannable at a glance). Clicking that preview
+# opens the complete text here instead. The click itself is a plain browser
+# navigation to `?view_draft=<complaint_id>` (same mechanism as the
+# queue_view bar-jump links above -- see main()'s handling of it), not a
+# Streamlit widget, since a custom HTML table cell can't carry a widget
+# callback directly.
+# ---------------------------------------------------------------------------
+@st.dialog("Full draft", width="large")
+def show_full_draft_dialog(complaint_id, company, draft_text):
+    st.markdown(f"**{complaint_id} — {company}**")
+    st.markdown(draft_text.replace("\n", "  \n") if draft_text else "*(no draft text)*")
+
+
+def draft_text_of(record):
+    return (record["agents"]["agent3"]["output"] or {}).get("draft") or record.get("draft") or ""
+
+
+def draft_preview_of(draft, max_len=110):
+    # Collapses newlines/whitespace to single spaces before truncating --
+    # a raw "\n\n" surviving inside the <a> tag below breaks Streamlit's
+    # markdown-to-HTML pass (a blank line inside inline HTML gets read as a
+    # paragraph break, splitting one anchor into two real DOM elements;
+    # confirmed live before this fix, not a hypothetical). A collapsed,
+    # single-line snippet is also just a cleaner table preview either way.
+    collapsed = " ".join(draft.split())
+    return (collapsed[:max_len] + "…") if len(collapsed) > max_len else collapsed
+
+
+def draft_preview_link_html(record, preview_text, queue_view):
+    href = f"?view_draft={quote(record['complaint_id'])}&queue_view={quote(queue_view)}#queue-section"
+    return f'<a href="{href}" target="_self" class="draft-preview-link" title="Click to read the full draft">{preview_text}</a>'
 
 
 # ---------------------------------------------------------------------------
 # Queue table -- drafts awaiting human review.
 # ---------------------------------------------------------------------------
 def render_queue_table(records):
-    escalated = [r for r in records if r["decision"] == "ESCALATE_TO_HUMAN"]
+    # Records have no date_received of their own (see export_dashboard_data.mjs's
+    # comment on the flattened shape) -- their position in the array IS
+    # chronological order (append-only Sheet writes / simulator's fixture
+    # order), so reversing it is what "latest ticket first" means here.
+    escalated = [r for r in reversed(records) if r["decision"] == "ESCALATE_TO_HUMAN"]
     heading = "#### Queue: drafts awaiting human review"
     if not escalated:
         md_html(f'{heading}\n<p class="section-caption">No tickets currently awaiting human review.</p>')
@@ -643,17 +911,20 @@ def render_queue_table(records):
 
     rows = []
     for r in escalated:
-        draft = (r["agents"]["agent3"]["output"] or {}).get("draft", "")
-        draft_preview = (draft[:110] + "…") if len(draft) > 110 else draft
+        draft = draft_text_of(r)
+        draft_preview = draft_preview_of(draft)
+        draft_link = draft_preview_link_html(r, draft_preview, "Escalated to human")
         reason = (r["agents"]["agent4"]["output"] or {}).get("reason", "")
         confidence = (r["agents"]["agent4"]["output"] or {}).get("confidence")
+        retrieval = retrieval_badge_html(r)
         rows.append(
             f"""
             <tr>
                 <td class="mono">{r['complaint_id']}</td>
                 <td>{r['company']}</td>
                 <td>{r['issue']}</td>
-                <td>{draft_preview}</td>
+                <td>{retrieval}</td>
+                <td>{draft_link}</td>
                 <td>{confidence:.2f}</td>
                 <td>{reason}</td>
             </tr>
@@ -663,11 +934,12 @@ def render_queue_table(records):
     md_html(
         f"""
         {heading}
+        {RETRIEVAL_COLUMN_CAPTION}
         <table class="queue-table">
             <thead>
                 <tr>
-                    <th>Complaint ID</th><th>Company</th><th>Issue</th>
-                    <th>Draft (preview)</th><th>QA confidence</th><th>Escalation reason</th>
+                    <th>Complaint ID</th><th>Company</th><th>Issue</th><th>Retrieval</th>
+                    <th>Draft (click to read in full)</th><th>QA confidence</th><th>Escalation reason</th>
                 </tr>
             </thead>
             <tbody>{''.join(rows)}</tbody>
@@ -677,31 +949,35 @@ def render_queue_table(records):
 
 
 def render_auto_resolved_table(records):
-    auto_resolved = [r for r in records if r["decision"] == "AUTO_RESOLVE"]
+    # See render_queue_table's comment: array position is chronological order.
+    auto_resolved = [r for r in reversed(records) if r["decision"] == "AUTO_RESOLVE"]
     heading = "#### Queue: auto-resolved tickets"
     if not auto_resolved:
         md_html(
             f"""
             {heading}
-            <p class="section-caption">No tickets have auto-resolved in this log yet. This table renders
-            correctly once a real record has decision=AUTO_RESOLVE.</p>
+            <p class="section-caption">No tickets have auto-resolved yet — this table will populate
+            automatically as soon as one does.</p>
             """
         )
         return
 
     rows = []
     for r in auto_resolved:
-        draft = r.get("draft") or ""
-        draft_preview = (draft[:110] + "…") if len(draft) > 110 else draft
+        draft = draft_text_of(r)
+        draft_preview = draft_preview_of(draft)
+        draft_link = draft_preview_link_html(r, draft_preview, "Auto-resolved")
         confidence = (r["agents"]["agent4"]["output"] or {}).get("confidence")
         confidence_str = f"{confidence:.2f}" if confidence is not None else "—"
+        retrieval = retrieval_badge_html(r)
         rows.append(
             f"""
             <tr>
                 <td class="mono">{r['complaint_id']}</td>
                 <td>{r['company']}</td>
                 <td>{r['issue']}</td>
-                <td>{draft_preview}</td>
+                <td>{retrieval}</td>
+                <td>{draft_link}</td>
                 <td>{confidence_str}</td>
             </tr>
             """
@@ -710,11 +986,12 @@ def render_auto_resolved_table(records):
     md_html(
         f"""
         {heading}
+        {RETRIEVAL_COLUMN_CAPTION}
         <table class="queue-table">
             <thead>
                 <tr>
-                    <th>Complaint ID</th><th>Company</th><th>Issue</th>
-                    <th>Draft (sent automatically)</th><th>QA confidence</th>
+                    <th>Complaint ID</th><th>Company</th><th>Issue</th><th>Retrieval</th>
+                    <th>Draft (click to read in full)</th><th>QA confidence</th>
                 </tr>
             </thead>
             <tbody>{''.join(rows)}</tbody>
@@ -812,6 +1089,19 @@ def main():
             # warns is a conflicting/undefined combination.
             st.session_state["queue_view"] = "Escalated to human"
 
+    # Opens the full-draft popup when a draft preview link above was clicked
+    # (a real navigation to `?view_draft=<complaint_id>`, same mechanism as
+    # queue_view). Cleared immediately, unlike queue_view -- this is a
+    # one-time reaction to the click that led here, not state that should
+    # keep re-opening the dialog on every later, unrelated rerun (e.g.
+    # changing the category filter).
+    requested_draft_id = st.query_params.get("view_draft")
+    if requested_draft_id:
+        del st.query_params["view_draft"]
+        match = next((r for r in records if r["complaint_id"] == requested_draft_id), None)
+        if match:
+            show_full_draft_dialog(match["complaint_id"], match["company"], draft_text_of(match))
+
     tab_overview, tab_technical = st.tabs(["Overview", technical_label])
 
     with tab_overview:
@@ -824,12 +1114,11 @@ def main():
         )
         if len(records) < 50:
             st.markdown(
-                f'<p class="section-caption"><strong>{len(records)} ticket(s) processed to date</strong> — '
-                "small n because this is a pilot, not because anything's faked: every record here has a "
-                "genuine pipeline decision, either from the hand-verified fixtures (spec Section 6) run "
-                "through real Agent 1-4 (3 of them) or the mock decision layer (the rest), or from further "
-                "real tickets processed since. Charts below reflect exactly what's real today, not a "
-                f"padded sample. {data_source_note}</p>",
+                f'<p class="section-caption"><strong>{len(records)} ticket(s) processed to date.</strong> '
+                "This is an early-stage pilot, so the sample is intentionally small — every record here "
+                "reflects a genuine pipeline decision, drawn from hand-verified test cases and live tickets "
+                "processed since. The dashboard updates automatically as more tickets come in. "
+                f"{data_source_note}</p>",
                 unsafe_allow_html=True,
             )
 
@@ -840,12 +1129,13 @@ def main():
         render_kpi_card(cols[1], "Citation accuracy", ca_val, ca_sub)
         sla_val, sla_sub = kpi_sla_compliance()
         render_kpi_card(cols[2], "SLA compliance", sla_val, sla_sub)
-        ea_val, ea_sub = kpi_escalation_agreement(filtered_records)
-        render_kpi_card(cols[3], "Escalation agreement", ea_val, ea_sub)
+        mr_val, mr_sub = kpi_missed_risk_rate(filtered_records)
+        render_kpi_card(cols[3], "Missed-risk rate", mr_val, mr_sub)
         cat_val, cat_sub = kpi_category_agreement(filtered_records)
         render_kpi_card(cols[4], "Category agreement", cat_val, cat_sub)
 
-        render_phase8_dual_signal_footnote(filtered_records)
+        md_html(build_escalation_caution_footnote_html(filtered_records))
+        render_retrieval_grounding_footnote(filtered_records)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -961,8 +1251,8 @@ def main():
 
     with tab_technical:
         st.markdown(
-            '<p class="section-caption">Agent-level detail, kept separate from the business-facing view '
-            "(spec Section 10).</p>",
+            '<p class="section-caption">Agent-level detail, kept separate from the business-facing '
+            "overview above.</p>",
             unsafe_allow_html=True,
         )
         render_agent_legend()
@@ -975,12 +1265,12 @@ def main():
         st.markdown("#### Raw pipeline log")
         st.dataframe(pd.json_normalize(filtered_records), width='stretch', height=300)
 
-        with st.expander("Other required disclosures (spec Section 14)"):
+        with st.expander("Other disclosures"):
             st.markdown(
                 "- Real, live, government-verified complaints against named real companies — "
                 "independent portfolio analysis, not affiliated with or endorsed by any company named in the data.\n"
-                "- Escalation-agreement and similar outcome-comparison metrics are directional signals, "
-                "not certified accuracy.\n"
+                "- Missed-risk rate, category agreement, and similar outcome-comparison metrics are directional "
+                "signals, not certified accuracy.\n"
                 "- Policy citations reference real federal regulation; this is a technical demonstration, "
                 "not legal advice."
             )
@@ -991,7 +1281,7 @@ def main():
 def render_disclosure_banner():
     st.markdown(
         '<div class="disclosure-banner">Customer/account records shown here are <strong>synthetic</strong> '
-        "(spec Section 3c) — generated to demonstrate the pipeline, not real customer data. "
+        "— generated to demonstrate the pipeline, not real customer data. "
         "servicemember_flag and special_population_flag carry forward CFPB's own real tags field where present; "
         "everything else in the CRM record is synthetic.</div>",
         unsafe_allow_html=True,
