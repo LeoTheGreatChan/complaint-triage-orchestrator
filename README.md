@@ -85,7 +85,7 @@ flowchart TD
     J --> K[Live Streamlit Dashboard]
 ```
 
-**What's actually real here, not simulated:**
+**What's real here:**
 - Real CFPB complaint data, fetched live from the public Consumer Complaint Database API
 - Real federal regulation text (FDCPA, FCRA, Regulation Z), sourced verbatim from Cornell LII/CFPB
 - Real Claude API calls for all four agents — not mocked, not templated
@@ -391,8 +391,8 @@ implemented:
   phrase matching instead: `"fraudulent"` / `"not mine"` / `"don't recognize"` /
   `"identity theft"` / `"unauthorized"` → adds `identity-theft`; `"didn't receive"` /
   `"never got"` / `"no notice"` / `"without notice"` → adds `validation`. Seeded
-  directly from spec Section 9's examples, not invented in the abstract.
-- **Documented, not smoothed over.** The tool remains lexical; a real Claude-backed
+  directly from spec Section 9's real examples.
+- **Documented as a known limitation.** The tool remains lexical; a real Claude-backed
   tool call at Phase 7 would do this better without a bespoke phrase table. Per spec
   v6, the Phase 6 dashboard's citation-accuracy metric will need the explicit caveat
   that its ceiling is bounded by this tool's vocabulary coverage, not purely by agent
@@ -402,7 +402,7 @@ implemented:
   tool missed (see "Phase 8" below) — confirming the ceiling named here was real, not
   hypothetical.
 
-### Untested branches — all three closed with real tickets, not invented ones (v13)
+### Untested branches — all three closed with real tickets (v13)
 
 Originally three branches shared one root cause: **the Ticket C compound-issue fix
 (spec Section 6) is what removed the fixtures' only examples of Agent 3 and Agent 4
@@ -478,7 +478,7 @@ appear in the aggregation buckets either (checked during Phase 1's taxonomy work
 
 `ground_truth.cfpb_disputed_flag` is set to an explicit `"unavailable — CFPB
 discontinued this field from the public API"` string on every record — reported as
-missing, not silently dropped or worked around with a fabricated substitute.
+missing, rather than silently dropped or replaced with a placeholder value.
 
 ### The comparison methodology, built from what's actually available
 
@@ -553,9 +553,8 @@ of two genuinely different real sources (see "Live dashboard data source" below)
 simulator, or the real Google Sheet. Since Phase 7, a live (non-fixture) ticket no
 longer dead-ends — it flows through the real Product path (real Agent 1–4, real
 Claude calls) exactly like a fixture flows through the mock path. The dashboard shows
-real, small n honestly rather than padding the log with invented tickets to make
-charts look like a fuller pilot run, with an in-app note under the KPI row saying so
-explicitly.
+exactly what's real, at whatever sample size that currently is, with an in-app note
+under the KPI row explaining that this is an early-stage pilot.
 Nothing in the chart/KPI code assumes an exact count, so it fills in correctly once a
 real pilot run accumulates more.
 
@@ -566,7 +565,7 @@ node scripts/export_dashboard_data.mjs               # from the simulator (n=10,
 node scripts/export_dashboard_data.mjs --from-sheets  # from the real Google Sheet (n=11, see below)
 ```
 
-Both are genuine, non-fabricated sources, just proving different layers:
+Both are real sources, just proving different layers:
 
 - **Default (simulator):** runs `scripts/simulate_workflow.mjs`'s `execute()` against
   the real, committed workflow JSON. **10 records** — the Section 6 fixtures A/B/C plus
@@ -996,10 +995,10 @@ summary.
 - **Dashboard citation-accuracy footnote** (`dashboard/app.py`'s
   `build_phase8_footnote_html()`): reports how often lexical and semantic agreed on
   Product-path tickets, and for any disagreement, both citations side by side plus the
-  semantic match's document version. Currently discloses "not yet reflected in this
-  data source" — honestly, not hidden — because no real Product-path execution has
-  written these columns to the live Sheet yet; verified live against a running Streamlit
-  session reading the real Sheet.
+  semantic match's document version. Currently shows an explicit "not yet reflected in
+  this data source" note, since no real Product-path execution has written these
+  columns to the live Sheet yet; verified live against a running Streamlit session
+  reading the real Sheet.
 
 ### The live bug this phase found (same discipline as Phase 7's near-misses)
 
