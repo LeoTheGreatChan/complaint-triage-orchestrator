@@ -177,6 +177,73 @@ against a temporary 1-escalate/1-auto-resolve test fixture swapped into
 `pipeline_log.json` and back, since no real data with that shape existed yet; that gap
 is now closed with real, hand-verified tickets.
 
+## Retrieval grounding: badges and the footnote
+
+Real regulation retrieval (Phase 9's restructure — see the main README) exists in
+exactly 5 of this build's 17 real records: the 12 that predate it (10 fixtures plus two
+earlier real, non-fixture tickets — SoFi 24246633, CITIBANK 24332933) were decided
+before retrieval ran at all, so they carry no candidate data and no grounding verdict.
+The Retrieval column (`retrieval_badge_html`) reads that absence honestly rather than
+guessing: no semantic *and* no lexical candidate on record means "No retrieval used," a
+distinct state from every other badge, not a blank cell.
+
+For the 5 tickets that did go through retrieval, the badge reports whether Agent 2's
+citation is grounded in what retrieval actually surfaced, not whether the two search
+strategies agreed with each other — **Grounded** (citation matches a retrieved
+candidate), **No regulation applies** (Agent 2 judged none of the candidates fit),
+**Flagged** (Agent 2 cited something neither tool surfaced or explicitly outside the
+cached corpus, auto-escalated rather than shipped unverified), or a defensive **Not
+verified** fallback for a citation that somehow never got a grounding check at all
+(currently unreachable — every real Product-path ticket has one). Of the 5: 1
+(25183526) got **No regulation applies** — both retrieval tools surfaced Reg Z
+§1026.13, and Agent 2 correctly declined to cite it, since nothing in the record shows
+a formal billing-error dispute (see "Verified against one real execution" in the main
+README's Phase 9 section); the other 4 (25210852, 25184341, 25183345, 25183930) are
+**Flagged**. None are currently **Grounded** — this pilot's still-small reference
+corpus hasn't yet produced a Product-path ticket where a real citation matches what
+retrieval surfaced. The footnote above the queue
+(`build_retrieval_grounding_footnote_html`) reports the same split in one sentence
+(0 grounded, 4 flagged, 1 declined), scoped to just these 5 real tickets, and
+deliberately doesn't lead with that "0" — see the messaging fix below for why that
+mattered.
+
+**Two real bugs found by asking a direct question about one ticket, not by test
+coverage.** Asked why 25184341 showed as "Grounded" when lexical and semantic
+retrieval had drawn two different conclusions, two independent defects turned up in
+the same data path:
+1. `retrieval_badge_html` treated "grounding was never checked"
+   (`outside_cached_corpus` and `citation_not_in_retrieval` both `null`) the same as
+   "checked and clean," defaulting straight to "Grounded." Fixed by adding the
+   explicit "Not verified" branch above.
+2. `dashboard/sheets_source.py`'s live-fetch path — the code actually serving the
+   deployed dashboard — never mapped `agent2_outside_cached_corpus`,
+   `agent2_citation_not_in_retrieval`, `escalate_outside_cached_corpus`, or
+   `escalate_citation_ungrounded` out of the raw Sheet row at all, regardless of what
+   was genuinely stored there. `scripts/export_dashboard_data.mjs`'s equivalent
+   `reshapeSheetRow()` had these mapped correctly — the two reshaping
+   implementations had quietly drifted apart. Both bugs meant the same four flagged
+   tickets displayed as falsely verified wherever the live Sheet was actually read
+   from; the static snapshot path happened to mask bug 2, since it was regenerated
+   (and thus correctly reshaped) less often than the live dashboard was viewed.
+
+**Backfilled the 4 historical rows that predated grounding, rather than leaving them
+null forever.** Those four flagged tickets' `citation_not_in_retrieval` field had
+genuinely never been computed and written — not lost, just never run. Recomputed with
+the exact same `isCitationGroundedInRetrieval()` formula the live pipeline uses
+(verified against each ticket's real stored candidate JSON in a standalone script
+first) and wrote `TRUE` directly to the real Sheet's `agent2_citation_not_in_retrieval`
+and `escalate_citation_ungrounded` columns for all four. `outside_cached_corpus` was
+deliberately left blank for these four — it's Agent 2's own self-report from the
+original run, and there's no honest way to reconstruct after the fact what Agent 2
+itself did or didn't flag.
+
+**"Phase 7" / "Phase 9" are internal build vocabulary now kept off every user-facing
+dashboard string**, including badge tooltips, the column caption, and the footnote —
+this dashboard's actual reader is a business/compliance reviewer with no reason to know
+what those numbers mean, and prior copy that used them read as confusing rather than
+informative. The terms are still fine in code comments, docstrings, and the main
+README, since those readers are developers.
+
 ## Category filter
 
 A "Filter by product category" `st.multiselect` sits above the two Overview charts and
@@ -281,11 +348,14 @@ account wasn't an option (the Google Cloud org this project runs under enforces
 instead.
 
 Consequence worth knowing: the real Sheet only ever contains whatever has actually been
-written to it by a genuine n8n execution or direct write — as of this build, that's all
-10 fixture tickets plus one further real, non-fixture ticket from the first genuine
-autonomous trigger-fired run (SoFi, complaint 24246633), so `--from-sheets` now produces
-`n=11` against the simulator-driven default's `n=10`. Both stay real in their own way:
-the simulator proves the pipeline *logic*, `--from-sheets` (and now the live read) prove
-the *storage* layer, and neither one is padded or fabricated — the ten fixtures agree
-with the simulator's own decisions exactly, and the eleventh simply doesn't exist in the
-simulator's fixture set at all.
+written to it by a genuine n8n execution or direct write — as of this build, that's the
+10 fixture tickets, two further real non-fixture tickets from before the Phase 9
+retrieval restructure (SoFi, complaint 24246633; CITIBANK, complaint 24332933), and five
+real Product-path tickets decided after that restructure shipped (25183526, 25210852,
+25184341, 25183345, 25183930) — so `--from-sheets` now produces `n=17` against the
+simulator-driven default's `n=10`. Both stay real in their own way: the simulator proves
+the pipeline *logic*, `--from-sheets` (and now the live read) prove the *storage* layer,
+and neither one is padded or fabricated — the ten fixtures agree with the simulator's
+own decisions exactly, and the other seven simply don't exist in the simulator's fixture
+set at all. See "Retrieval grounding: badges and the footnote" below for what
+distinguishes the last five from the first twelve.

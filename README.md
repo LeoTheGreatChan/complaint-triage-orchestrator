@@ -217,7 +217,7 @@ in the actual n8n engine, not just the simulator.
 
 ```bash
 node scripts/export_dashboard_data.mjs               # from the simulator (n=10, all fixtures)
-node scripts/export_dashboard_data.mjs --from-sheets  # from the real Google Sheet (n=11, see below)
+node scripts/export_dashboard_data.mjs --from-sheets  # from the real Google Sheet (n=17, see below)
 ```
 
 Both are real sources, just proving different layers:
@@ -229,17 +229,20 @@ Both are real sources, just proving different layers:
 - **`--from-sheets`:** reshapes `dashboard/data/sheets_snapshot.json` — a real snapshot
   of the actual "Pipeline Log" Google Sheet (see "Storage and dedup" below) — back into
   the nested shape the dashboard expects (`reshapeSheetRow()` in the export script, the
-  disclosed inverse of `flattenForSheets()`). **11 records:** the ten Section 6 fixtures
+  disclosed inverse of `flattenForSheets()`). **17 records:** the ten Section 6 fixtures
   (A/B/C/F/G via earlier real writes; D/E/H/I/J backfilled in a later pass, entirely by
   hand-clicking each node of the real committed workflow in the n8n UI, since n8n's
   manual/partial execution mode doesn't correctly merge two branches converging on the
   same node — each merge point had to be resolved by pinning the correct branch's cached
   output before continuing; see git history for the blow-by-blow) agree exactly with the
-  simulator's own decisions for those same ten, plus one further real, non-fixture
-  ticket (SoFi, complaint 24246633) that exists only in the real Sheet — fetched and
-  decided by the first genuine autonomous trigger-fired run of the real Product path
-  (cost-capped to 1 ticket). Proves the *storage* layer is correct — this reads exactly
-  what's genuinely sitting in the real Sheet, nothing added.
+  simulator's own decisions for those same ten, plus two further real, non-fixture
+  tickets that exist only in the real Sheet (SoFi, complaint 24246633; CITIBANK,
+  complaint 24332933 — the latter also the source of the KPI section's n=1 timing
+  measurement below), plus the five real Product-path tickets decided after the Phase 9
+  retrieval restructure shipped (25183526, 25210852, 25184341, 25183345, 25183930) — see
+  "Phase 9 — RAG-benefits-decision restructure" below. Proves the *storage* layer is
+  correct — this reads exactly what's genuinely sitting in the real Sheet, nothing
+  added.
 
 **Live sync, now wired up.** The deployed dashboard reads the real Sheet directly, live,
 on every page load (`dashboard/sheets_source.py`, cached 5 minutes via
@@ -706,7 +709,14 @@ node (`Live Ticket (Awaiting Phase 7)`) that no longer exists in the workflow.
 The deployed dashboard reads live Sheet data by default (see "Live dashboard data
 source" above); the fixture-derived ten of these twelve records match the simulator's
 decisions exactly, and the other two (SoFi and CITIBANK, both genuine non-fixture live
-tickets) exist only in the real numbers below:
+tickets) exist only in the real numbers below. **This is the measurement point as of
+this phase, not the real Sheet's current size:** Phase 9 (below) added five more real
+Product-path tickets, bringing the Sheet to n=17, but citation accuracy, escalation
+agreement, and category agreement haven't been recomputed against the larger sample —
+doing that honestly needs the same live-CFPB-ground-truth lookup this table's own
+numbers required, not a relabel. What is known about those five — each one's
+retrieval-grounding outcome — is in "Phase 9 — RAG-benefits-decision restructure"
+below.
 
 | KPI | Status (n=12) | Why |
 |---|---|---|
