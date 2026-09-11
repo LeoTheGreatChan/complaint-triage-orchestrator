@@ -48,9 +48,9 @@ wastes the parts that genuinely are repetitive.
 complaint, researches the applicable regulation, drafts a response, then QA-checks its
 own citation and confidence. Each agent can conditionally call a deterministic tool (a
 taxonomy lookup, a regulation-text fetch, a CRM read) only when the case actually calls
-for it (see "Conditional tool-use" below) — the one exception is regulation retrieval
-itself, a mandatory evidence-gathering stage that runs before Agent 2 on every ticket,
-not a tool Agent 2 discretionarily calls. All four stages feed a
+for it — the one exception is regulation retrieval itself, a mandatory
+evidence-gathering stage that runs before Agent 2 on every ticket, not a tool Agent 2
+discretionarily calls. All four stages feed a
 **deterministic escalation gate** — explicitly not a fifth AI call, but plain code
 compounding several independent signals (confidence, risk category, complaint history,
 account value, stated monetary exposure) into a hard route: auto-resolve, or human
@@ -161,6 +161,127 @@ evidence, and human escalation wherever risk remains — then measure whether it
 actually worked, and say so plainly when a number (like 17% escalation agreement,
 below) looks worse than it is and needs explaining rather than hiding.
 
+## How to run it
+
+Every command below targets the real, committed artifacts this README documents
+elsewhere — nothing here is a separate quickstart with its own simplified logic.
+
+### How to import into n8n
+
+1. In n8n: **Workflows → Import from File** → select
+   `n8n/workflows/complaint_triage_orchestrator.json`.
+2. No credentials required — the CFPB API is public and unauthenticated.
+3. Run **Manual Trigger** once to test end-to-end before activating the schedule.
+
+**Re-importing into an existing installation (e.g. after the Merge-node retrofit
+below):** n8n's Import from File/URL *pastes into the current canvas* rather than
+replacing it — importing on top of an already-populated workflow duplicates every
+node instead of updating it in place. To pick up structural changes safely:
+1. Create a brand-new, empty workflow in n8n.
+2. Import the updated JSON into that empty canvas (no duplication risk — nothing to
+   collide with).
+3. Re-attach the real Google Sheets credential to the "Google Sheets: Log Decision"
+   node — credentials aren't part of the exported JSON (deliberately, see "Storage
+   and dedup" below), so this one step has to happen by hand in the UI regardless of
+   import method.
+4. Once verified, delete or archive the old workflow.
+
+### How to run
+
+**Real-verified against a live local n8n instance for the first time this build**
+(`npx n8n start`, imported via Workflows → Import from File) — every earlier
+verification pass, however thorough, only ever ran the committed JSON through the
+custom simulator, not n8n itself. That first real import caught a genuine bug the
+simulator structurally couldn't: n8n silently drops a workflow's second
+`n8n-nodes-base.manualTrigger` node rather than erroring (31 of 32 nodes survived —
+see "Fixture test harness" in Phase 3's "Architecture" section below for the fix, removing the redundant trigger). After
+the fix, a clean re-import brought in all 31 nodes, and manually executing `Load
+Fixture Tickets` via n8n's "Execute step" produced the real, correct 10-ticket output
+in the actual n8n engine, not just the simulator.
+
+1. Import [`n8n/workflows/complaint_triage_orchestrator.json`](n8n/workflows/complaint_triage_orchestrator.json)
+   into n8n (Workflows → Import from File) — no credentials needed.
+2. Select **Load Fixture Tickets** and run it via "Execute step" (it's its own entry
+   point — see "Fixture test harness" in Phase 3's "Architecture" section below for why there's no dedicated trigger node).
+   8 of the 10 items should reach `Final: Escalate to Human Queue`, and 2 (Tickets I/J)
+   should reach `Final: Auto-Resolve`.
+3. Running **Manual Trigger** (the live path) will route anything to `Live Ticket
+   (Awaiting Phase 7)` unless a fetched complaint_id happens to be one of the ten
+   fixtures — three are a fixed historical snapshot, but seven (D-J) were pulled from a
+   real live batch and can genuinely reappear on a fresh fetch, in which case they'll
+   now correctly route to a real decision instead of the dead end. To pull and inspect
+   a real batch this way without opening n8n, see "Pull a real batch of live tickets"
+   under Phase 6 below — it drives this exact path through the simulator.
+
+### Live dashboard data source
+
+```bash
+node scripts/export_dashboard_data.mjs               # from the simulator (n=10, all fixtures)
+node scripts/export_dashboard_data.mjs --from-sheets  # from the real Google Sheet (n=11, see below)
+```
+
+Both are real sources, just proving different layers:
+
+- **Default (simulator):** runs `scripts/simulate_workflow.mjs`'s `execute()` against
+  the real, committed workflow JSON. **10 records** — the Section 6 fixtures A/B/C plus
+  seven real tickets D-J, hand-verified the same way (see "Pull a real batch of live
+  tickets" below). Proves the pipeline *logic* end-to-end; doesn't touch real storage.
+- **`--from-sheets`:** reshapes `dashboard/data/sheets_snapshot.json` — a real snapshot
+  of the actual "Pipeline Log" Google Sheet (see "Storage and dedup" below) — back into
+  the nested shape the dashboard expects (`reshapeSheetRow()` in the export script, the
+  disclosed inverse of `flattenForSheets()`). **11 records:** the ten Section 6 fixtures
+  (A/B/C/F/G via earlier real writes; D/E/H/I/J backfilled in a later pass, entirely by
+  hand-clicking each node of the real committed workflow in the n8n UI, since n8n's
+  manual/partial execution mode doesn't correctly merge two branches converging on the
+  same node — each merge point had to be resolved by pinning the correct branch's cached
+  output before continuing; see git history for the blow-by-blow) agree exactly with the
+  simulator's own decisions for those same ten, plus one further real, non-fixture
+  ticket (SoFi, complaint 24246633) that exists only in the real Sheet — fetched and
+  decided by the first genuine autonomous trigger-fired run of the real Product path
+  (cost-capped to 1 ticket). Proves the *storage* layer is correct — this reads exactly
+  what's genuinely sitting in the real Sheet, nothing added.
+
+**Live sync, now wired up.** The deployed dashboard reads the real Sheet directly, live,
+on every page load (`dashboard/sheets_source.py`, cached 5 minutes via
+`@st.cache_data(ttl=300)` so a freshly-processed ticket shows up without a server
+restart) — it no longer depends on `sheets_snapshot.json` being refreshed by hand. That
+file and the `pipeline_log.json` it generates still exist and still matter: they're the
+deliberate fallback path, rendered whenever no credential is configured or the live call
+fails for any reason, so the dashboard never crashes on a live-data hiccup — it just
+quietly serves the last real snapshot instead, with an in-app caption disclosing which
+of the two it's actually showing ("Data source: live Google Sheet" vs "Data source:
+static snapshot").
+
+**Why OAuth instead of a service account.** The natural choice — a Google Cloud service
+account, scoped read-only, with the Sheet shared to its own email as Viewer — turned out
+to be unavailable: this project's Google Cloud org enforces the organization policy
+`iam.disableServiceAccountKeyCreation`, a "secure by default" setting that blocks
+service-account key creation outright, not a project-level misconfiguration. Rather than
+have an org admin weaken that policy for one dashboard credential, the dashboard
+authenticates via a dedicated OAuth 2.0 Client ID instead (Desktop app type, Internal
+consent screen — restricted to this Google Workspace org's own accounts, so it never
+needs Google's verification review). A refresh token is minted once, interactively, by
+[`scripts/get_google_oauth_refresh_token.py`](scripts/get_google_oauth_refresh_token.py)
+— it drives a real browser-based Google consent flow and writes the resulting
+`client_id`/`client_secret`/`refresh_token` straight into `.streamlit/secrets.toml`
+(git-ignored; see `.streamlit/secrets.toml.example` for the shape), never printing them
+to the terminal. In production, the same three fields go into the hosting platform's own
+secret manager (Streamlit Community Cloud's "Secrets" panel, Render's "Secret Files",
+etc.) instead of any committed file.
+
+**The scope tradeoff, disclosed rather than hidden.** OAuth authenticates as the account
+owner, not as an isolated principal the way a service account does — Google's
+`spreadsheets.readonly` scope is necessarily "read every Sheet this account can read,"
+and there's no narrower single-file OAuth scope without a browser-based Google Picker
+consent flow (the `drive.file` scope), which wasn't built here given the Sheet's actual
+contents are already either real public CFPB complaint data or disclosed-synthetic CRM
+records — genuinely not sensitive — and the token is fully revocable in one click from
+the account's Google security settings regardless. This tradeoff, and the alternatives
+considered (a public "anyone with the link" Sheet plus a restricted API key; true
+Workload Identity Federation, impractical here since neither Streamlit Community Cloud
+nor Render are GCP-trusted OIDC issuers), was worked through explicitly rather than
+defaulted into.
+
 ## Documentation verification
 
 Every data, taxonomy, and regulatory-citation claim in the spec has been reconciled
@@ -258,25 +379,8 @@ This workflow does **not** dedup here — by design, per spec Section 11, dedup-
 belongs to the storage layer (Google Sheets Append-or-Update). **Resolved:** see
 "Storage and dedup" below — no longer an open gap.
 
-### How to import into n8n
-
-1. In n8n: **Workflows → Import from File** → select
-   `n8n/workflows/complaint_triage_orchestrator.json`.
-2. No credentials required — the CFPB API is public and unauthenticated.
-3. Run **Manual Trigger** once to test end-to-end before activating the schedule.
-
-**Re-importing into an existing installation (e.g. after the Merge-node retrofit
-below):** n8n's Import from File/URL *pastes into the current canvas* rather than
-replacing it — importing on top of an already-populated workflow duplicates every
-node instead of updating it in place. To pick up structural changes safely:
-1. Create a brand-new, empty workflow in n8n.
-2. Import the updated JSON into that empty canvas (no duplication risk — nothing to
-   collide with).
-3. Re-attach the real Google Sheets credential to the "Google Sheets: Log Decision"
-   node — credentials aren't part of the exported JSON (deliberately, see "Storage
-   and dedup" below), so this one step has to happen by hand in the UI regardless of
-   import method.
-4. Once verified, delete or archive the old workflow.
+*(Import and run instructions now live in "How to run it," near the top of this
+README.)*
 
 ### Verified during this phase, against the live API (not assumed from docs)
 
@@ -344,7 +448,7 @@ generation — into `Route: Fixture or Live?` → `IF: Is Fixture Ticket?`, the 
 the live pipeline's output passes through. This node is its own entry point, not behind
 a dedicated trigger node — run it directly via n8n's "Execute step." It originally sat
 behind a second Manual Trigger node (`Fixture Test Trigger (A/B/C)`), removed after live
-n8n import testing (see "How to run" below) surfaced a real platform constraint: n8n
+n8n import testing (see "How to run it" near the top of this README) surfaced a real platform constraint: n8n
 silently drops a workflow's second `n8n-nodes-base.manualTrigger` node on import rather
 than erroring, so the redundant trigger was never actually reachable in a real n8n
 instance. The custom simulator never caught this, since it just executes the committed
@@ -472,32 +576,8 @@ regulation-index search:
 All three were structurally present and correctly wired in the workflow since Phase 3
 — this just replaced "confirm at Phase 7" with real evidence ahead of it.
 
-### How to run
-
-**Real-verified against a live local n8n instance for the first time this build**
-(`npx n8n start`, imported via Workflows → Import from File) — every earlier
-verification pass, however thorough, only ever ran the committed JSON through the
-custom simulator, not n8n itself. That first real import caught a genuine bug the
-simulator structurally couldn't: n8n silently drops a workflow's second
-`n8n-nodes-base.manualTrigger` node rather than erroring (31 of 32 nodes survived —
-see "Fixture test harness" above for the fix, removing the redundant trigger). After
-the fix, a clean re-import brought in all 31 nodes, and manually executing `Load
-Fixture Tickets` via n8n's "Execute step" produced the real, correct 10-ticket output
-in the actual n8n engine, not just the simulator.
-
-1. Import [`n8n/workflows/complaint_triage_orchestrator.json`](n8n/workflows/complaint_triage_orchestrator.json)
-   into n8n (Workflows → Import from File) — no credentials needed.
-2. Select **Load Fixture Tickets** and run it via "Execute step" (it's its own entry
-   point — see "Fixture test harness" above for why there's no dedicated trigger node).
-   8 of the 10 items should reach `Final: Escalate to Human Queue`, and 2 (Tickets I/J)
-   should reach `Final: Auto-Resolve`.
-3. Running **Manual Trigger** (the live path) will route anything to `Live Ticket
-   (Awaiting Phase 7)` unless a fetched complaint_id happens to be one of the ten
-   fixtures — three are a fixed historical snapshot, but seven (D-J) were pulled from a
-   real live batch and can genuinely reappear on a fresh fetch, in which case they'll
-   now correctly route to a real decision instead of the dead end. To pull and inspect
-   a real batch this way without opening n8n, see "Pull a real batch of live tickets"
-   under Phase 6 below — it drives this exact path through the simulator.
+*(Fixture-run instructions now live in "How to run it," near the top of this
+README.)*
 
 ## Phase 5 — ground-truth comparison
 
@@ -591,7 +671,7 @@ streamlit run dashboard/app.py
 `dashboard/data/pipeline_log.json`, generated by
 [`scripts/export_dashboard_data.mjs`](scripts/export_dashboard_data.mjs) — not a
 separate, hand-maintained mock dataset. That script can populate `records` from either
-of two genuinely different real sources (see "Live dashboard data source" below): the
+of two genuinely different real sources (see "How to run it" near the top of this README): the
 simulator, or the real Google Sheet. Since Phase 7, a live (non-fixture) ticket no
 longer dead-ends — it flows through the real Product path (real Agent 1–4, real
 Claude calls) exactly like a fixture flows through the mock path. The dashboard shows
@@ -600,74 +680,8 @@ under the KPI row explaining that this is an early-stage pilot.
 Nothing in the chart/KPI code assumes an exact count, so it fills in correctly once a
 real pilot run accumulates more.
 
-### Live dashboard data source
-
-```bash
-node scripts/export_dashboard_data.mjs               # from the simulator (n=10, all fixtures)
-node scripts/export_dashboard_data.mjs --from-sheets  # from the real Google Sheet (n=11, see below)
-```
-
-Both are real sources, just proving different layers:
-
-- **Default (simulator):** runs `scripts/simulate_workflow.mjs`'s `execute()` against
-  the real, committed workflow JSON. **10 records** — the Section 6 fixtures A/B/C plus
-  seven real tickets D-J, hand-verified the same way (see "Pull a real batch of live
-  tickets" below). Proves the pipeline *logic* end-to-end; doesn't touch real storage.
-- **`--from-sheets`:** reshapes `dashboard/data/sheets_snapshot.json` — a real snapshot
-  of the actual "Pipeline Log" Google Sheet (see "Storage and dedup" below) — back into
-  the nested shape the dashboard expects (`reshapeSheetRow()` in the export script, the
-  disclosed inverse of `flattenForSheets()`). **11 records:** the ten Section 6 fixtures
-  (A/B/C/F/G via earlier real writes; D/E/H/I/J backfilled in a later pass, entirely by
-  hand-clicking each node of the real committed workflow in the n8n UI, since n8n's
-  manual/partial execution mode doesn't correctly merge two branches converging on the
-  same node — each merge point had to be resolved by pinning the correct branch's cached
-  output before continuing; see git history for the blow-by-blow) agree exactly with the
-  simulator's own decisions for those same ten, plus one further real, non-fixture
-  ticket (SoFi, complaint 24246633) that exists only in the real Sheet — fetched and
-  decided by the first genuine autonomous trigger-fired run of the real Product path
-  (cost-capped to 1 ticket). Proves the *storage* layer is correct — this reads exactly
-  what's genuinely sitting in the real Sheet, nothing added.
-
-**Live sync, now wired up.** The deployed dashboard reads the real Sheet directly, live,
-on every page load (`dashboard/sheets_source.py`, cached 5 minutes via
-`@st.cache_data(ttl=300)` so a freshly-processed ticket shows up without a server
-restart) — it no longer depends on `sheets_snapshot.json` being refreshed by hand. That
-file and the `pipeline_log.json` it generates still exist and still matter: they're the
-deliberate fallback path, rendered whenever no credential is configured or the live call
-fails for any reason, so the dashboard never crashes on a live-data hiccup — it just
-quietly serves the last real snapshot instead, with an in-app caption disclosing which
-of the two it's actually showing ("Data source: live Google Sheet" vs "Data source:
-static snapshot").
-
-**Why OAuth instead of a service account.** The natural choice — a Google Cloud service
-account, scoped read-only, with the Sheet shared to its own email as Viewer — turned out
-to be unavailable: this project's Google Cloud org enforces the organization policy
-`iam.disableServiceAccountKeyCreation`, a "secure by default" setting that blocks
-service-account key creation outright, not a project-level misconfiguration. Rather than
-have an org admin weaken that policy for one dashboard credential, the dashboard
-authenticates via a dedicated OAuth 2.0 Client ID instead (Desktop app type, Internal
-consent screen — restricted to this Google Workspace org's own accounts, so it never
-needs Google's verification review). A refresh token is minted once, interactively, by
-[`scripts/get_google_oauth_refresh_token.py`](scripts/get_google_oauth_refresh_token.py)
-— it drives a real browser-based Google consent flow and writes the resulting
-`client_id`/`client_secret`/`refresh_token` straight into `.streamlit/secrets.toml`
-(git-ignored; see `.streamlit/secrets.toml.example` for the shape), never printing them
-to the terminal. In production, the same three fields go into the hosting platform's own
-secret manager (Streamlit Community Cloud's "Secrets" panel, Render's "Secret Files",
-etc.) instead of any committed file.
-
-**The scope tradeoff, disclosed rather than hidden.** OAuth authenticates as the account
-owner, not as an isolated principal the way a service account does — Google's
-`spreadsheets.readonly` scope is necessarily "read every Sheet this account can read,"
-and there's no narrower single-file OAuth scope without a browser-based Google Picker
-consent flow (the `drive.file` scope), which wasn't built here given the Sheet's actual
-contents are already either real public CFPB complaint data or disclosed-synthetic CRM
-records — genuinely not sensitive — and the token is fully revocable in one click from
-the account's Google security settings regardless. This tradeoff, and the alternatives
-considered (a public "anyone with the link" Sheet plus a restricted API key; true
-Workload Identity Federation, impractical here since neither Streamlit Community Cloud
-nor Render are GCP-trusted OIDC issuers), was worked through explicitly rather than
-defaulted into.
+*(Live-vs-static data source setup now lives in "How to run it," near the top of
+this README.)*
 
 **History: pulling a real batch of live tickets, before Phase 7 existed.**
 `pipeline_log.json` used to also carry a second, completely separate array,
@@ -788,7 +802,7 @@ how the graph behaves under manual, non-trigger-fired execution.
 
 **Not yet re-imported into the live local n8n instance** — this fix lives in the
 committed generator and JSON; picking it up in a real running n8n install needs the
-"re-importing into an existing installation" procedure above (a fresh empty workflow,
+"re-importing into an existing installation" procedure in "How to run it" near the top of this README (a fresh empty workflow,
 not an import on top of the current one) plus re-attaching the real Google Sheets
 credential by hand, since credentials never travel with the exported JSON.
 
@@ -827,42 +841,8 @@ new `Merge: Test/Product Final` node, since the escalation math, ground-truth
 comparison, and Sheets write are pure, agent-source-agnostic logic (spec Section
 7/8/11) — no reason to duplicate those too.
 
-### Why a plain HTTP Request node, not n8n's LangChain AI Agent node
-
-Real Agent 1–4 call Anthropic's Messages API directly via `n8n-nodes-base.httpRequest`
-(one real, proven-working node type — see "CFPB Complaint Search" — that this
-generator, the simulator, and a real live import have all already verified), not one
-of n8n's LangChain AI Agent / Chat Model nodes. Three reasons:
-1. **Unverified ground avoided.** The LangChain node family's exact parameter shape,
-   typeVersion, and non-`"main"` connection type (`ai_languageModel`, not a plain data
-   edge) would all be new and unconfirmed against this n8n instance — httpRequest
-   isn't.
-2. **Predictable cost.** Exactly one Messages API call per agent per ticket, always —
-   no autonomous multi-turn tool-calling loop that could silently consume extra calls.
-3. **The real "tools" don't need a hosted tool-call round-trip.** Taxonomy lookup,
-   regulation search, exact clause fetch, and CRM reads are deterministic reads against
-   this repo's own cached reference data (already real, already tested — see "The
-   regulation-index tool" above). Each real agent's only job is to decide WHETHER a
-   ticket needs one and supply its own reasoning, via a system prompt that asks for the
-   exact same `agentN_tool_used` / `agentN_output` JSON shape the mock nodes already
-   produce — so every downstream Tool/IF/Merge node needs zero changes to consume real
-   output instead of a fixture lookup.
-
-Model: `claude-haiku-4-5-20251001` (cost-efficient — this is structured
-classification/extraction, not open-ended reasoning), one flat constant in
-`build_workflow.js` (`ANTHROPIC_MODEL`), easy to change in one place.
-
-**Now verified against a live n8n instance** (was flagged unverified before the real
-run, same honesty convention as `googleSheetsNode()`): the generic-header-auth
-parameter shape for `httpRequest` (`authentication: "genericCredentialType"`,
-`genericAuthType: "httpHeaderAuth"`) works as generated. On import, create an n8n
-"Header Auth" credential with header name `x-api-key` and your real Anthropic API key
-as the value, then attach it to each of the 4 Real Agent nodes (they start out
-pointing at `REPLACE_WITH_YOUR_ANTHROPIC_CREDENTIAL_ID` placeholders). n8n also offers
-a native "Anthropic" predefined credential type as an alternative — it handles
-`x-api-key` auth for you and has a live "Test connection" button, but does *not* know
-about Anthropic's other required headers (`anthropic-version`), so if you switch a
-node to it, re-add that header manually or the call will fail.
+*(The LangChain-vs-HTTP-Request rationale now lives in "Technical details," at the
+end of this README.)*
 
 ### A real near-miss, caught before it cost anything
 
@@ -1260,6 +1240,53 @@ both correctly read `false` — nothing was ungrounded, because nothing was cite
   than a hand-picked regex) is the natural next fix.
 - The production regulation corpus is still the same 37 real chunks / 4 documents named
   above — same open item carried over from Phase 8.
+
+---
+
+## Technical details
+
+One deeper architectural decision, pulled out of Phase 7's chronology because it's a
+design rationale a technically minded reader may want to inspect on its own, not a
+build-history event with a date attached. (Kept deliberately small — this section
+earns a second subsection only if a genuinely independent design decision needs the
+same treatment later.)
+
+### Why a plain HTTP Request node, not n8n's LangChain AI Agent node
+
+Real Agent 1–4 call Anthropic's Messages API directly via `n8n-nodes-base.httpRequest`
+(one real, proven-working node type — see "CFPB Complaint Search" — that this
+generator, the simulator, and a real live import have all already verified), not one
+of n8n's LangChain AI Agent / Chat Model nodes. Three reasons:
+1. **Unverified ground avoided.** The LangChain node family's exact parameter shape,
+   typeVersion, and non-`"main"` connection type (`ai_languageModel`, not a plain data
+   edge) would all be new and unconfirmed against this n8n instance — httpRequest
+   isn't.
+2. **Predictable cost.** Exactly one Messages API call per agent per ticket, always —
+   no autonomous multi-turn tool-calling loop that could silently consume extra calls.
+3. **The real "tools" don't need a hosted tool-call round-trip.** Taxonomy lookup,
+   regulation search, exact clause fetch, and CRM reads are deterministic reads against
+   this repo's own cached reference data (already real, already tested — see "The
+   regulation-index tool" above). Each real agent's only job is to decide WHETHER a
+   ticket needs one and supply its own reasoning, via a system prompt that asks for the
+   exact same `agentN_tool_used` / `agentN_output` JSON shape the mock nodes already
+   produce — so every downstream Tool/IF/Merge node needs zero changes to consume real
+   output instead of a fixture lookup.
+
+Model: `claude-haiku-4-5-20251001` (cost-efficient — this is structured
+classification/extraction, not open-ended reasoning), one flat constant in
+`build_workflow.js` (`ANTHROPIC_MODEL`), easy to change in one place.
+
+**Now verified against a live n8n instance** (was flagged unverified before the real
+run, same honesty convention as `googleSheetsNode()`): the generic-header-auth
+parameter shape for `httpRequest` (`authentication: "genericCredentialType"`,
+`genericAuthType: "httpHeaderAuth"`) works as generated. On import, create an n8n
+"Header Auth" credential with header name `x-api-key` and your real Anthropic API key
+as the value, then attach it to each of the 4 Real Agent nodes (they start out
+pointing at `REPLACE_WITH_YOUR_ANTHROPIC_CREDENTIAL_ID` placeholders). n8n also offers
+a native "Anthropic" predefined credential type as an alternative — it handles
+`x-api-key` auth for you and has a live "Test connection" button, but does *not* know
+about Anthropic's other required headers (`anthropic-version`), so if you switch a
+node to it, re-add that header manually or the call will fail.
 
 ---
 
