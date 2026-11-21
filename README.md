@@ -1241,15 +1241,16 @@ both correctly read `false` — nothing was ungrounded, because nothing was cite
 ### What's left
 
 - `isCitationGroundedInRetrieval()`'s structural check only recognizes citation patterns
-  for this pilot's four already-cached documents (FDCPA §1692e/g, FCRA §1681c-2, Reg Z
+  for this pilot's four already-cached statute sections (FDCPA §1692e/g, FCRA §1681c-2, Reg Z
   §1026.13). A citation to any other real regulation — even one Agent 2 identifies
   correctly — reads as ungrounded, because the check has no pattern to match it against,
   not because the check found it wrong. This is disclosed behavior, not a hidden gap:
   the four Product-path tickets backfilled above all hit exactly this case. Widening the
   pattern match to the corpus's full citation list (`CITATION_TO_FILE`'s keys, rather
   than a hand-picked regex) is the natural next fix.
-- The production regulation corpus is still the same 37 real chunks / 4 documents named
-  above — same open item carried over from Phase 8.
+- The production regulation corpus is still the same 37 real chunks across 5 documents
+  (the four sections above plus CFPB's 15-day company-response rule) — same open item
+  carried over from Phase 8.
 
 ---
 
